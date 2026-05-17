@@ -32,6 +32,7 @@
 
     const NEGATIVE_MARK_RE = /(choicegroup_incorrect|(^|[^a-zа-яё])(incorrect|wrong|false|неверн|неправильн|ошиб)([^a-zа-яё]|$))/i;
     const POSITIVE_MARK_RE = /(choicegroup_correct|(^|[^a-zа-яё])(correct|right|true|верн|правильн)([^a-zа-яё]|$))/i;
+    const GENERIC_PROMPTS_RE = /^(выберите|укажите|отметьте)\s+(правильный|правильные|все правильные|один правильный|верный|верные)\s+(вариант|варианты|ответ|ответы|утверждение|утверждения)/i;
 
     if (!HOST_RE.test(location.hostname)) {
         return;
@@ -1208,6 +1209,13 @@
         return root;
     }
 
+    function isGenericPrompt(text) {
+        if (!text) return true;
+        if (GENERIC_PROMPTS_RE.test(text)) return true;
+        if (text.length < 5) return true;
+        return false;
+    }
+
     function findPromptBeforeNode(root, node) {
         if (!(root instanceof HTMLElement) || !(node instanceof Element)) {
             return '';
@@ -1218,13 +1226,16 @@
             let previous = cursor.previousElementSibling;
             while (previous) {
                 const direct = textOf(previous);
-                if (direct && direct.length >= 8) {
+                if (direct && direct.length >= 8 && !isGenericPrompt(direct)) {
                     return direct;
                 }
 
-                const nested = textOf(previous.querySelector('h1, h2, h3, h4, legend, .problem-title, .question-title, .problem-header, p'));
-                if (nested && nested.length >= 8) {
-                    return nested;
+                const nestedNodes = previous.querySelectorAll('h1, h2, h3, h4, legend, .problem-title, .question-title, .problem-header, p');
+                for (const nestedNode of nestedNodes) {
+                    const nested = textOf(nestedNode);
+                    if (nested && nested.length >= 8 && !isGenericPrompt(nested)) {
+                        return nested;
+                    }
                 }
 
                 previous = previous.previousElementSibling;
@@ -2037,6 +2048,7 @@
             }
 
             input.click();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
             highlightQuestionBlock(block);
             debugSync('apply_answers_success', {
