@@ -67,6 +67,27 @@ test('buildStableQuestionKeyBase stays stable for the same question content', ()
     assert.equal(first, second);
 });
 
+test('buildStableQuestionKeyBase ignores document path changes for the same question', () => {
+    const first = openeduShared.buildStableQuestionKeyBase({
+        sourcePath: '/xblock/block-v1:demo+course+type@problem+block@123',
+        prompt: 'Кто считается отцом информатики?',
+        answerTexts: ['Алан Тьюринг', 'Чарльз Бэббидж'],
+        choiceCount: 2,
+        textInputCount: 0,
+        allowsMultipleAnswers: false
+    });
+    const second = openeduShared.buildStableQuestionKeyBase({
+        sourcePath: '/courses/demo/courseware/unit/test/',
+        prompt: 'Кто считается отцом информатики?',
+        answerTexts: ['Чарльз Бэббидж', 'Алан Тьюринг'],
+        choiceCount: 2,
+        textInputCount: 0,
+        allowsMultipleAnswers: false
+    });
+
+    assert.equal(first, second);
+});
+
 test('buildStableQuestionKeyBase changes when answer set changes', () => {
     const first = openeduShared.buildStableQuestionKeyBase({
         sourcePath: '/courses/1',

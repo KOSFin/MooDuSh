@@ -207,6 +207,7 @@ class Database:
         # Backfill prompt_norm using Python (SQL \w doesn't handle Cyrillic).
         await self._backfill_prompt_norms()
         await self._backfill_question_fingerprints()
+        await self._merge_duplicate_openedu_questions()
 
     async def _backfill_prompt_norms(self) -> None:
         assert self.pool is not None
@@ -276,6 +277,116 @@ class Database:
                     "UPDATE openedu_questions SET question_fingerprint = $1 WHERE test_key = $2 AND question_key = $3",
                     updates,
                 )
+
+    async def _merge_duplicate_openedu_questions(self) -> None:
+        """Collapse old OpenEdu rows that only differ by unstable question keys."""
+        assert self.pool is not None
+        async with self.pool.acquire() as conn:
+            groups = await conn.fetch(
+                """
+                SELECT test_key, question_fingerprint, array_agg(question_key ORDER BY question_key) AS question_keys
+                FROM openedu_questions
+                WHERE question_fingerprint != '' AND question_key LIKE 'q2_%'
+                GROUP BY test_key, question_fingerprint
+                HAVING COUNT(*) > 1
+                LIMIT 200
+                """
+            )
+            if not groups:
+                return
+
+            async with conn.transaction():
+                for group in groups:
+                    test_key = group['test_key']
+                    question_keys = [str(key) for key in (group['question_keys'] or []) if str(key)]
+                    if len(question_keys) < 2:
+                        continue
+
+                    canonical_key = sorted(
+                        question_keys,
+                        key=lambda key: (0 if '_' not in key[3:] else 1, len(key), key),
+                    )[0]
+                    duplicate_keys = [key for key in question_keys if key != canonical_key]
+                    if not duplicate_keys:
+                        continue
+
+                    for duplicate_key in duplicate_keys:
+                        stat_rows = await conn.fetch(
+                            """
+                            SELECT answer_key, answer_text, verified_count, fallback_count
+                            FROM openedu_answer_stats
+                            WHERE test_key = $1 AND question_key = $2
+                            """,
+                            test_key,
+                            duplicate_key,
+                        )
+                        for row in stat_rows:
+                            await conn.execute(
+                                """
+                                INSERT INTO openedu_answer_stats
+                                    (test_key, question_key, answer_key, answer_text, verified_count, fallback_count, updated_at)
+                                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                                ON CONFLICT (test_key, question_key, answer_key)
+                                DO UPDATE SET answer_text = COALESCE(NULLIF(openedu_answer_stats.answer_text, ''), EXCLUDED.answer_text),
+                                              verified_count = openedu_answer_stats.verified_count + EXCLUDED.verified_count,
+                                              fallback_count = openedu_answer_stats.fallback_count + EXCLUDED.fallback_count,
+                                              updated_at = NOW()
+                                """,
+                                test_key,
+                                canonical_key,
+                                row['answer_key'],
+                                row['answer_text'],
+                                int(row['verified_count'] or 0),
+                                int(row['fallback_count'] or 0),
+                            )
+
+                        await conn.execute(
+                            "DELETE FROM openedu_answer_stats WHERE test_key = $1 AND question_key = $2",
+                            test_key,
+                            duplicate_key,
+                        )
+                        await conn.execute(
+                            """
+                            UPDATE openedu_participant_question_state
+                            SET question_key = $1, updated_at = NOW()
+                            WHERE test_key = $2 AND question_key = $3
+                              AND NOT EXISTS (
+                                  SELECT 1
+                                  FROM openedu_participant_question_state existing
+                                  WHERE existing.test_key = $2
+                                    AND existing.participant_key = openedu_participant_question_state.participant_key
+                                    AND existing.question_key = $1
+                              )
+                            """,
+                            canonical_key,
+                            test_key,
+                            duplicate_key,
+                        )
+                        await conn.execute(
+                            "DELETE FROM openedu_participant_question_state WHERE test_key = $1 AND question_key = $2",
+                            test_key,
+                            duplicate_key,
+                        )
+                        await conn.execute(
+                            """
+                            UPDATE openedu_questions canonical
+                            SET completed_count = canonical.completed_count + duplicate.completed_count,
+                                updated_at = GREATEST(canonical.updated_at, duplicate.updated_at)
+                            FROM openedu_questions duplicate
+                            WHERE canonical.test_key = $1
+                              AND canonical.question_key = $2
+                              AND duplicate.test_key = $1
+                              AND duplicate.question_key = $3
+                            """,
+                            test_key,
+                            canonical_key,
+                            duplicate_key,
+                        )
+                        await conn.execute(
+                            "DELETE FROM openedu_questions WHERE test_key = $1 AND question_key = $2",
+                            test_key,
+                            duplicate_key,
+                        )
 
     # ── Users ──────────────────────────────────────────────────────
 
@@ -509,7 +620,6 @@ class Database:
                     )
 
                     added_selected = selected_answer_keys - prev_selected_keys
-                    removed_selected = prev_selected_keys - selected_answer_keys
                     # Verified answers only grow — never compute removed_verified.
                     added_verified = verified_answer_keys - prev_verified_keys
 
@@ -531,30 +641,6 @@ class Database:
                             context['testKey'], question_key, answer_key,
                             answer_text_by_key.get(answer_key, ''),
                             verified_inc, selected_inc,
-                        )
-
-                    # Only decrement fallback (selection popularity) counts.
-                    # Never touch verified_count — it is permanent.
-                    for answer_key in removed_selected:
-                        # Skip if this answer has verified status — don't
-                        # remove the stats row even if fallback reaches 0.
-                        await conn.execute(
-                            """
-                            UPDATE openedu_answer_stats
-                            SET fallback_count = GREATEST(0, fallback_count - 1),
-                                updated_at = NOW()
-                            WHERE test_key = $1 AND question_key = $2 AND answer_key = $3
-                            """,
-                            context['testKey'], question_key, answer_key,
-                        )
-                        # Only delete if BOTH counts are zero (no verified, no fallback).
-                        await conn.execute(
-                            """
-                            DELETE FROM openedu_answer_stats
-                            WHERE test_key = $1 AND question_key = $2 AND answer_key = $3
-                              AND verified_count = 0 AND fallback_count = 0
-                            """,
-                            context['testKey'], question_key, answer_key,
                         )
 
                     await conn.execute(

@@ -154,6 +154,10 @@ body {
     gap: 8px;
 }
 
+.actions-api-toggle {
+    margin-bottom: 8px;
+}
+
 .subscribe-btn {
     display: inline-flex;
     align-items: center;

@@ -46,7 +46,8 @@
     }
 
     const isTopFrame = window === window.top;
-    const openeduShared = window.ParamExtOpeneduShared || {};
+    const localOpeneduShared = buildLocalOpeneduSharedApi();
+    const openeduShared = window.ParamExtOpeneduShared || localOpeneduShared;
     const DEBUG_SYNC_ENABLED = (() => {
         try {
             const raw = localStorage.getItem(DEBUG_SYNC_STORAGE_KEY);
@@ -91,6 +92,7 @@
     let contentFallbackBlockedReason = '';
     let participantKeyCache = '';
     let lastMergedStatsByQuestion = null;
+    let lastRenderedQuestions = [];
     let lastMessageTriggerAt = 0;
     let lastMutationTriggerAt = 0;
     let lastMeaningfulQuestionsAt = 0;
@@ -101,6 +103,197 @@
     let topFrameOnlineState = { online: false, text: 'Wait...' };
     window.__PARAMEXT_TOPFRAME_ONLINE_STATE = topFrameOnlineState;
     let _topContextPromise = null;
+
+    function buildLocalOpeneduSharedApi() {
+        let fingerprintPunctRe = null;
+        try {
+            fingerprintPunctRe = new RegExp('[^\\p{L}\\p{N}_\\s]', 'gu');
+        } catch (_) {
+            fingerprintPunctRe = /[^\w\s]/g;
+        }
+
+        const FNV64_OFFSET_A = 0xcbf29ce484222325n;
+        const FNV64_OFFSET_B = 0x84222325cbf29ce4n;
+        const FNV64_PRIME = 0x100000001b3n;
+
+        function collapseWhitespaceLocal(value) {
+            return String(value || '').replace(/\s+/g, ' ').trim();
+        }
+
+        function normalizeTextLocal(value) {
+            return collapseWhitespaceLocal(value).toLowerCase();
+        }
+
+        function normalizeFingerprintTextLocal(value) {
+            return collapseWhitespaceLocal(String(value || '').replace(fingerprintPunctRe, '')).toLowerCase();
+        }
+
+        function hashHex64Local(input, offset) {
+            let hashValue = offset;
+            const source = String(input || '');
+            for (let i = 0; i < source.length; i += 1) {
+                hashValue ^= BigInt(source.charCodeAt(i));
+                hashValue = BigInt.asUintN(64, hashValue * FNV64_PRIME);
+            }
+            return hashValue.toString(16).padStart(16, '0');
+        }
+
+        function hashHex128Local(input) {
+            const source = String(input || '');
+            return hashHex64Local('a|' + source, FNV64_OFFSET_A) + hashHex64Local('b|' + source, FNV64_OFFSET_B);
+        }
+
+        function normalizeMediaSourceLocal(raw) {
+            const value = collapseWhitespaceLocal(raw);
+            if (!value) {
+                return '';
+            }
+
+            try {
+                const parsed = new URL(value, 'https://openedu.ru');
+                return collapseWhitespaceLocal(parsed.pathname + (parsed.search || ''));
+            } catch (_) {
+                return value.replace(/^https?:\/\/[^/]+/i, '');
+            }
+        }
+
+        function getMediaFileNameLocal(path) {
+            const normalized = collapseWhitespaceLocal(path);
+            if (!normalized) {
+                return '';
+            }
+
+            const parts = normalized.split('/');
+            return collapseWhitespaceLocal(parts[parts.length - 1] || '');
+        }
+
+        function buildMediaTokenLocal(item, index) {
+            const kind = normalizeTextLocal(item?.kind || item?.tag || 'media') || 'media';
+            const source = normalizeMediaSourceLocal(item?.src || item?.href || '');
+            const title = collapseWhitespaceLocal(item?.title || item?.ariaLabel || item?.alt || '');
+            const fileName = getMediaFileNameLocal(source);
+            const primary = fileName || source || title || ('item-' + String(index + 1));
+            return title && title !== primary
+                ? (kind + ':' + primary + ' | ' + title)
+                : (kind + ':' + primary);
+        }
+
+        function deriveOptionAnswerTextLocal(payload) {
+            const text = collapseWhitespaceLocal(payload?.text || '');
+            if (text) {
+                return text;
+            }
+
+            const labelled = collapseWhitespaceLocal(payload?.ariaLabel || payload?.title || '');
+            if (labelled) {
+                return labelled;
+            }
+
+            const mediaDescriptors = Array.isArray(payload?.mediaDescriptors) ? payload.mediaDescriptors : [];
+            if (mediaDescriptors.length > 0) {
+                return mediaDescriptors.map((item, index) => buildMediaTokenLocal(item, index)).join(' + ');
+            }
+
+            const inputValue = collapseWhitespaceLocal(payload?.inputValue || '');
+            if (inputValue) {
+                return inputValue;
+            }
+
+            return '';
+        }
+
+        function normalizeOptionListLocal(options) {
+            if (!Array.isArray(options)) {
+                return [];
+            }
+
+            return options
+                .map((option) => normalizeTextLocal(option?.answerText || ''))
+                .filter(Boolean)
+                .sort();
+        }
+
+        function buildQuestionFingerprintLocal(prompt, answerTexts) {
+            const promptNorm = normalizeFingerprintTextLocal(prompt);
+            const normalizedAnswers = [];
+            const seen = new Set();
+
+            (Array.isArray(answerTexts) ? answerTexts : []).forEach((answerText) => {
+                const answerNorm = normalizeFingerprintTextLocal(answerText);
+                if (!answerNorm || seen.has(answerNorm)) {
+                    return;
+                }
+                seen.add(answerNorm);
+                normalizedAnswers.push(answerNorm);
+            });
+
+            normalizedAnswers.sort();
+            if (!promptNorm && normalizedAnswers.length === 0) {
+                return '';
+            }
+
+            return hashHex128Local(JSON.stringify({
+                prompt: promptNorm,
+                answers: normalizedAnswers
+            }));
+        }
+
+        function buildStableQuestionKeyBaseLocal(payload) {
+            const prompt = String(payload?.prompt || '');
+            const answerTexts = Array.isArray(payload?.answerTexts) ? payload.answerTexts : [];
+            const choiceCount = Math.max(0, Number(payload?.choiceCount || 0));
+            const textInputCount = Math.max(0, Number(payload?.textInputCount || 0));
+            const allowsMultipleAnswers = Boolean(payload?.allowsMultipleAnswers);
+
+            return 'q2_' + hashHex128Local(JSON.stringify({
+                promptNorm: normalizeFingerprintTextLocal(prompt),
+                questionFingerprint: buildQuestionFingerprintLocal(prompt, answerTexts),
+                choiceCount,
+                textInputCount,
+                allowsMultipleAnswers
+            }));
+        }
+
+        function matchesQuestionReferenceLocal(candidate, reference) {
+            if (!candidate || !reference) {
+                return false;
+            }
+
+            const candidateKey = collapseWhitespaceLocal(candidate.questionKey);
+            const referenceKey = collapseWhitespaceLocal(reference.questionKey);
+            if (candidateKey && referenceKey && candidateKey === referenceKey) {
+                return true;
+            }
+
+            const candidateDomId = collapseWhitespaceLocal(candidate.domId);
+            const referenceDomId = collapseWhitespaceLocal(reference.domId);
+            if (candidateDomId && referenceDomId && candidateDomId === referenceDomId) {
+                return true;
+            }
+
+            const candidatePrompt = normalizeTextLocal(candidate.prompt);
+            const referencePrompt = normalizeTextLocal(reference.prompt);
+            if (!candidatePrompt || !referencePrompt || candidatePrompt !== referencePrompt) {
+                return false;
+            }
+
+            const candidateOptions = normalizeOptionListLocal(candidate.options);
+            const referenceOptions = normalizeOptionListLocal(reference.options);
+            if (candidateOptions.length === 0 || referenceOptions.length === 0) {
+                return true;
+            }
+
+            return candidateOptions.join('|') === referenceOptions.join('|');
+        }
+
+        return {
+            collapseWhitespace: collapseWhitespaceLocal,
+            normalizeText: normalizeTextLocal,
+            deriveOptionAnswerText: deriveOptionAnswerTextLocal,
+            buildStableQuestionKeyBase: buildStableQuestionKeyBaseLocal,
+            matchesQuestionReference: matchesQuestionReferenceLocal
+        };
+    }
 
     function debugSync(event, payload) {
         if (!DEBUG_SYNC_ENABLED) {
@@ -252,10 +445,7 @@
         if (typeof openeduShared.buildStableQuestionKeyBase === 'function') {
             return openeduShared.buildStableQuestionKeyBase(payload);
         }
-
-        const sourcePath = String(payload?.sourcePath || '').trim();
-        const prompt = String(payload?.prompt || '').trim();
-        return 'q2_' + hash(sourcePath + '|' + prompt);
+        return localOpeneduShared.buildStableQuestionKeyBase(payload);
     }
 
     function delay(ms) {
@@ -778,7 +968,16 @@
             return;
         }
         iframeQuestionsCache = questions;
-        renderInlineWands(lastMergedStatsByQuestion, questions);
+        const mergedStatsByQuestion = mergeStatsByQuestion(
+            null,
+            null,
+            questions,
+            lastMergedStatsByQuestion,
+            lastRenderedQuestions,
+        );
+        renderInlineWands(mergedStatsByQuestion, questions);
+        lastMergedStatsByQuestion = mergedStatsByQuestion;
+        lastRenderedQuestions = snapshotQuestionReferences(questions);
     }
 
     function shouldHandleDomRefreshTrigger() {
@@ -1005,9 +1204,10 @@
 
     function getOptionAnswerText(label, input) {
         const rawText = label instanceof HTMLElement ? textOf(label) : '';
+        const cleanRawText = normalizeQuestionOptionText(rawText);
         if (typeof openeduShared.deriveOptionAnswerText === 'function') {
             return openeduShared.deriveOptionAnswerText({
-                text: rawText,
+                text: cleanRawText,
                 ariaLabel: collapseWhitespace(label?.getAttribute?.('aria-label') || ''),
                 title: collapseWhitespace(label?.getAttribute?.('title') || ''),
                 inputValue: input instanceof HTMLInputElement ? collapseWhitespace(input.value || '') : '',
@@ -1015,7 +1215,7 @@
             });
         }
 
-        return rawText;
+        return cleanRawText;
     }
 
     function getQuestionBlocks() {
@@ -1051,12 +1251,27 @@
         const labelNode = root.querySelector(
             '.problem-header, .problem-group-label, .wrapper-problem-response p, .wrapper-problem-response h3, .problem-title, .question-title, legend'
         );
-        const prompt = textOf(labelNode);
-        if (prompt) {
-            return prompt;
+        return normalizePromptLikeText(textOf(labelNode))
+            || normalizePromptLikeText(textOf(root.querySelector('h2, h3, p, legend')));
+    }
+
+    function normalizePromptLikeText(value) {
+        let text = collapseWhitespace(value);
+        if (!text) {
+            return '';
         }
 
-        return textOf(root.querySelector('h2, h3, p, legend'));
+        text = text
+            .replace(/\b(верно|неверно|правильно|неправильно|correct|incorrect|true|false)\s*:\s*/ig, '')
+            .replace(/\s*\b(верно|неверно|правильно|неправильно|correct|incorrect|true|false)\b\s*$/ig, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        return text;
+    }
+
+    function normalizeQuestionOptionText(value) {
+        return normalizePromptLikeText(value);
     }
 
     function getMarkerText(label, input) {
@@ -1489,7 +1704,78 @@
         return local;
     }
 
-    function mergeStatsByQuestion(remoteStatsByQuestion, localStatsByQuestion, questions) {
+    function snapshotQuestionReferences(questions) {
+        if (!Array.isArray(questions)) {
+            return [];
+        }
+
+        return questions.map((question) => ({
+            questionKey: String(question?.questionKey || ''),
+            domId: String(question?.domId || ''),
+            prompt: String(question?.prompt || ''),
+            options: Array.isArray(question?.options)
+                ? question.options.map((option) => ({
+                    answerText: String(option?.answerText || '')
+                }))
+                : []
+        }));
+    }
+
+    function buildMergedStatsEntry(source, localOnly) {
+        return {
+            completedCount: Math.max(0, Number(source?.completedCount || 0)),
+            verifiedAnswers: normalizeAnswerStatsList(source?.verifiedAnswers),
+            fallbackAnswers: normalizeAnswerStatsList(source?.fallbackAnswers),
+            localOnly: Boolean(localOnly),
+            similarMatch: Boolean(source?.similarMatch),
+            matchedBy: typeof source?.matchedBy === 'string'
+                ? source.matchedBy
+                : (Boolean(source?.similarMatch) ? 'similar' : 'exact'),
+            matchedQuestionKey: typeof source?.matchedQuestionKey === 'string' ? source.matchedQuestionKey : '',
+            matchedScore: Math.max(0, Number(source?.matchedScore || 0))
+        };
+    }
+
+    function getQuestionPresentationState(stats) {
+        const verifiedAnswers = normalizeAnswerStatsList(stats?.verifiedAnswers);
+        const fallbackAnswers = normalizeAnswerStatsList(stats?.fallbackAnswers);
+        const hasAnswers = verifiedAnswers.length > 0 || fallbackAnswers.length > 0;
+        const matchKind = String(stats?.matchedBy || (stats?.similarMatch ? 'similar' : 'exact'));
+
+        return {
+            verifiedAnswers,
+            fallbackAnswers,
+            hasAnswers,
+            matchKind,
+            isSimilar: matchKind === 'similar',
+            isContentMatch: matchKind === 'content'
+        };
+    }
+
+    function findPreservedStatsEntry(question, previousStatsByQuestion, previousQuestions) {
+        if (!question || !previousStatsByQuestion || !Array.isArray(previousQuestions) || previousQuestions.length === 0) {
+            return null;
+        }
+
+        const previousQuestion = findQuestionByReference(previousQuestions, question);
+        if (!previousQuestion) {
+            return null;
+        }
+
+        const previousEntry = previousStatsByQuestion[previousQuestion.questionKey];
+        if (!previousEntry) {
+            return null;
+        }
+
+        const preserved = buildMergedStatsEntry(previousEntry, Boolean(previousEntry.localOnly));
+        if (preserved.verifiedAnswers.length === 0 && preserved.fallbackAnswers.length === 0) {
+            return null;
+        }
+
+        return preserved;
+    }
+
+    function mergeStatsByQuestion(remoteStatsByQuestion, localStatsByQuestion, questions, previousStatsByQuestion, previousQuestions) {
         const merged = {};
 
         questions.forEach((question) => {
@@ -1506,18 +1792,29 @@
             const hasRemoteAnswers = remoteVerified.length > 0 || remoteFallback.length > 0;
 
             if (hasRemoteAnswers || !local) {
-                merged[key] = {
-                    completedCount: Number(remote.completedCount || 0),
-                    verifiedAnswers: remoteVerified,
-                    fallbackAnswers: remoteFallback,
-                    localOnly: false,
-                    similarMatch: Boolean(remote.similarMatch),
-                    matchedBy: typeof remote.matchedBy === 'string'
-                        ? remote.matchedBy
-                        : (Boolean(remote.similarMatch) ? 'similar' : 'exact'),
-                    matchedQuestionKey: typeof remote.matchedQuestionKey === 'string' ? remote.matchedQuestionKey : '',
-                    matchedScore: Math.max(0, Number(remote.matchedScore || 0))
-                };
+                if (hasRemoteAnswers) {
+                    merged[key] = {
+                        completedCount: Number(remote.completedCount || 0),
+                        verifiedAnswers: remoteVerified,
+                        fallbackAnswers: remoteFallback,
+                        localOnly: false,
+                        similarMatch: Boolean(remote.similarMatch),
+                        matchedBy: typeof remote.matchedBy === 'string'
+                            ? remote.matchedBy
+                            : (Boolean(remote.similarMatch) ? 'similar' : 'exact'),
+                        matchedQuestionKey: typeof remote.matchedQuestionKey === 'string' ? remote.matchedQuestionKey : '',
+                        matchedScore: Math.max(0, Number(remote.matchedScore || 0))
+                    };
+                    return;
+                }
+
+                const preserved = findPreservedStatsEntry(question, previousStatsByQuestion, previousQuestions);
+                if (preserved) {
+                    merged[key] = preserved;
+                    return;
+                }
+
+                merged[key] = buildMergedStatsEntry(remote, false);
                 return;
             }
 
@@ -1547,9 +1844,9 @@
     }
 
     function buildQuestionSignature(sourcePath, prompt, options, locationBucket, groupIdentity) {
-        const normalizedPrompt = normalizeText(prompt);
+        const normalizedPrompt = normalizeQuestionOptionText(prompt) || normalizeText(prompt);
         const optionSignature = options
-            .map((option) => normalizeText(option.answerText))
+            .map((option) => normalizeQuestionOptionText(option.answerText) || normalizeText(option.answerText))
             .filter(Boolean)
             .sort()
             .join('|');
@@ -1606,12 +1903,12 @@
                 const allowsMultipleAnswers = questionAllowsMultipleAnswers(groupRoot);
                 const stableAnswerTexts = groupOptions
                     .filter((option) => option.inputType !== 'text')
-                    .map((option) => String(option.answerText || '').trim())
+                    .map((option) => normalizeQuestionOptionText(option.answerText) || String(option.answerText || '').trim())
                     .filter(Boolean);
                 const textInputCount = groupOptions.filter((option) => option.inputType === 'text').length;
                 const questionKeyBase = buildStableQuestionKeyBase({
                     sourcePath,
-                    prompt,
+                    prompt: normalizeQuestionOptionText(prompt) || prompt,
                     answerTexts: stableAnswerTexts,
                     choiceCount: groupOptions.length,
                     textInputCount,
@@ -2155,9 +2452,13 @@
             }
 
             const stats = statsByQuestion?.[question.questionKey] || createEmptyStatsEntry();
-            const verifiedAnswers = normalizeAnswerStatsList(stats.verifiedAnswers);
-            const fallbackAnswers = normalizeAnswerStatsList(stats.fallbackAnswers);
+            const presentation = getQuestionPresentationState(stats);
+            const verifiedAnswers = presentation.verifiedAnswers;
+            const fallbackAnswers = presentation.fallbackAnswers;
             const isMulti = questionAllowsMultipleAnswers(block);
+            const hasAnswers = presentation.hasAnswers;
+            const isSimilar = presentation.isSimilar;
+            const isContentMatch = presentation.isContentMatch;
 
             let menu = block.querySelector('.' + INLINE_MENU_CLASS + '[' + INLINE_WAND_ATTR + '="' + question.questionKey + '"]');
             if (!(menu instanceof HTMLElement)) {
@@ -2175,21 +2476,25 @@
 
             menu.innerHTML = '';
 
-            const matchKind = String(stats.matchedBy || (stats.similarMatch ? 'similar' : 'exact'));
-            const isSimilar = matchKind === 'similar' || matchKind === 'content';
-
             const trigger = document.createElement('button');
             trigger.type = 'button';
-            trigger.className = 'paramext-openedu-inline-wand' + (isSimilar ? ' paramext-openedu-inline-wand--similar' : '');
-            trigger.textContent = verifiedAnswers.length > 0
+            trigger.className = 'paramext-openedu-inline-wand'
+                + (isSimilar ? ' paramext-openedu-inline-wand--similar' : '')
+                + (!hasAnswers ? ' paramext-openedu-inline-wand--empty' : '')
+                + (isContentMatch ? ' paramext-openedu-inline-wand--content' : '');
+            trigger.textContent = hasAnswers
                 ? (isSimilar ? '|*~' : '|*')
-                : (isSimilar ? '|*?~' : '|*?');
-            trigger.title = verifiedAnswers.length > 0
-                ? 'Открыть список проверенных ответов и статистики'
-                : 'Открыть статистику ответов';
-
-            if (isSimilar) {
-                trigger.title = 'Статистика получена из похожего вопроса';
+                : '|*';
+            if (!hasAnswers) {
+                trigger.title = isSimilar
+                    ? 'Для этого вопроса нет точных ответов, только похожие данные'
+                    : 'Для этого вопроса пока нет ответов';
+            } else if (isSimilar) {
+                trigger.title = isContentMatch
+                    ? 'Статистика получена по содержанию вопроса'
+                    : 'Статистика получена из похожего вопроса';
+            } else {
+                trigger.title = 'Открыть список проверенных ответов и статистики';
             }
 
             const popover = document.createElement('div');
@@ -2226,7 +2531,7 @@
 
                 const thisPane = document.createElement('div');
                 thisPane.className = 'paramext-openedu-inline-tab-pane';
-                thisPane.style.display = 'none';
+                thisPane.classList.add('hidden');
                 thisPane.textContent = 'Для этого вопроса пока нет своей статистики.';
 
                 const similarPane = document.createElement('div');
@@ -2235,15 +2540,15 @@
                 thisQuestionTab.addEventListener('click', () => {
                     thisQuestionTab.classList.add('active');
                     similarQuestionTab.classList.remove('active');
-                    thisPane.style.display = '';
-                    similarPane.style.display = 'none';
+                    thisPane.classList.remove('hidden');
+                    similarPane.classList.add('hidden');
                 });
 
                 similarQuestionTab.addEventListener('click', () => {
                     similarQuestionTab.classList.add('active');
                     thisQuestionTab.classList.remove('active');
-                    similarPane.style.display = '';
-                    thisPane.style.display = 'none';
+                    similarPane.classList.remove('hidden');
+                    thisPane.classList.add('hidden');
                 });
 
                 popover.appendChild(thisPane);
@@ -2303,7 +2608,7 @@
             if (allAnswers.length === 0) {
                 const empty = document.createElement('li');
                 empty.className = 'paramext-openedu-inline-empty';
-                empty.textContent = 'Нет статистики по этому вопросу.';
+                empty.textContent = isSimilar ? 'Нет точных ответов, только похожие данные.' : 'Нет статистики по этому вопросу.';
                 list.appendChild(empty);
             } else {
                 const sectionHeader = document.createElement('li');
@@ -2334,9 +2639,7 @@
                     row.appendChild(answerBtn);
 
                     const countsContainer = document.createElement('div');
-                    countsContainer.style.display = 'flex';
-                    countsContainer.style.gap = '4px';
-                    countsContainer.style.marginLeft = '8px';
+                    countsContainer.className = 'paramext-openedu-inline-counts';
 
                     if (answer.isVerified) {
                         const vCount = document.createElement('span');
@@ -2413,9 +2716,12 @@
         const matchedBy = String(stats.matchedBy || (stats.similarMatch ? 'similar' : 'exact'));
         if (matchedBy === 'similar' || matchedBy === 'content') {
             const titleBadge = document.createElement('span');
-            titleBadge.className = 'paramext-question-source-badge';
+            titleBadge.className = 'paramext-question-source-badge'
+                + (matchedBy === 'content' ? ' paramext-question-source-badge--content' : '');
             titleBadge.textContent = matchedBy === 'content' ? 'по содержанию' : 'похожий';
-            titleBadge.title = 'Статистика взята из похожего вопроса';
+            titleBadge.title = matchedBy === 'content'
+                ? 'Статистика найдена по совпадению текста вопроса и вариантов'
+                : 'Статистика взята из похожего вопроса';
             titleWrap.appendChild(titleBadge);
         }
 
@@ -2465,8 +2771,7 @@
             item.appendChild(text);
 
             const countsContainer = document.createElement('div');
-            countsContainer.style.display = 'flex';
-            countsContainer.style.gap = '4px';
+            countsContainer.className = 'paramext-answer-counts';
 
             if (answer.isVerified) {
                 const vCount = document.createElement('span');
@@ -2598,7 +2903,7 @@
 
         const similarPane = document.createElement('div');
         similarPane.className = 'paramext-stick-tab-pane';
-        similarPane.style.display = 'none';
+        similarPane.classList.add('hidden');
         similarItems.forEach((item) => {
             similarPane.appendChild(buildQuestionCard(item.question, item.index, item.stats));
         });
@@ -2606,15 +2911,15 @@
         exactTab.addEventListener('click', () => {
             exactTab.classList.add('active');
             similarTab.classList.remove('active');
-            exactPane.style.display = '';
-            similarPane.style.display = 'none';
+            exactPane.classList.remove('hidden');
+            similarPane.classList.add('hidden');
         });
 
         similarTab.addEventListener('click', () => {
             similarTab.classList.add('active');
             exactTab.classList.remove('active');
-            similarPane.style.display = '';
-            exactPane.style.display = 'none';
+            similarPane.classList.remove('hidden');
+            exactPane.classList.add('hidden');
         });
 
         stickBody.appendChild(tabBar);
@@ -2824,6 +3129,7 @@
 
                 renderInlineWands({}, []);
                 lastMergedStatsByQuestion = null;
+                lastRenderedQuestions = [];
 
                 if (isTopFrame) {
                     if (topFrameIframeQuestions && topFrameIframeQuestions.length > 0) {
@@ -2868,9 +3174,16 @@
                 const cachedStats = lastStatsResponse && typeof lastStatsResponse === 'object'
                     ? lastStatsResponse.statsByQuestion || null
                     : null;
-                const mergedStatsByQuestion = mergeStatsByQuestion(cachedStats, localStatsByQuestion, questions);
+                const mergedStatsByQuestion = mergeStatsByQuestion(
+                    cachedStats,
+                    localStatsByQuestion,
+                    questions,
+                    lastMergedStatsByQuestion,
+                    lastRenderedQuestions,
+                );
                 renderInlineWands(mergedStatsByQuestion, questions);
                 lastMergedStatsByQuestion = mergedStatsByQuestion;
+                lastRenderedQuestions = snapshotQuestionReferences(questions);
 
                 onlineState = { online: false, text: 'Sync пауза: ' + reason };
                 topFrameOnlineState = onlineState;
@@ -3004,7 +3317,13 @@
                 ? effectiveStatsResponse.statsByQuestion || null
                 : null;
 
-            const mergedStatsByQuestion = mergeStatsByQuestion(statsByQuestion, localStatsByQuestion, questions);
+            const mergedStatsByQuestion = mergeStatsByQuestion(
+                statsByQuestion,
+                localStatsByQuestion,
+                questions,
+                lastMergedStatsByQuestion,
+                lastRenderedQuestions,
+            );
             debugSync('cycle_stats_merged', {
                 pushOk: pushResult.ok,
                 pushStatus: pushResult.status,
@@ -3020,6 +3339,7 @@
 
             renderInlineWands(mergedStatsByQuestion, questions);
             lastMergedStatsByQuestion = mergedStatsByQuestion;
+            lastRenderedQuestions = snapshotQuestionReferences(questions);
 
             const pushActuallyFailed = allowNetwork && !pushResult.ok && pushResult.error !== 'not_changed';
             const statsActuallyFailed = allowNetwork && !statsResult.ok && statsResult.error !== 'cached';

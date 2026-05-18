@@ -63,7 +63,6 @@
     }
 
     function buildStableQuestionKeyBase(payload) {
-        const sourcePath = collapseWhitespace(payload?.sourcePath || '');
         const prompt = String(payload?.prompt || '');
         const answerTexts = Array.isArray(payload?.answerTexts) ? payload.answerTexts : [];
         const choiceCount = Math.max(0, Number(payload?.choiceCount || 0));
@@ -71,7 +70,6 @@
         const allowsMultipleAnswers = Boolean(payload?.allowsMultipleAnswers);
 
         return 'q2_' + hashHex128(JSON.stringify({
-            sourcePath,
             promptNorm: normalizeFingerprintText(prompt),
             questionFingerprint: buildQuestionFingerprint(prompt, answerTexts),
             choiceCount,
