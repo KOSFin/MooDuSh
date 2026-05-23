@@ -44,6 +44,19 @@
         tr:last-child td { border-bottom: 0; }
         tr.row-link:hover td { background: #fafafa; }
         .cell-wrap { max-width: 560px; overflow-wrap: anywhere; }
+        .question-list { display: grid; gap: 0; }
+        .question-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 14px 15px; border-bottom: 1px solid #edf2f7; }
+        .question-row:last-child { border-bottom: 0; }
+        .question-row:hover { background: #fafafa; }
+        .question-main { min-width: 0; display: grid; gap: 7px; }
+        .question-prompt { font-size: 14px; line-height: 1.42; color: #172033; overflow-wrap: anywhere; word-break: normal; }
+        .question-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: #667085; font-size: 12px; }
+        .question-test { font-weight: 750; text-decoration: none; color: #172033; }
+        .question-test:hover { text-decoration: underline; }
+        .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(68px, 1fr)); gap: 8px; align-content: start; min-width: 330px; }
+        .metric { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 8px 9px; }
+        .metric span { display: block; color: #667085; font-size: 11px; line-height: 1.2; }
+        .metric strong { display: block; margin-top: 3px; color: #172033; font-size: 16px; line-height: 1.1; }
         .badge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
         .badge-green { background: #dcfce7; color: #166534; }
         .badge-gray { background: #eef2f7; color: #475467; }
@@ -64,6 +77,8 @@
             .shell { padding: 18px; }
             .grid-2 { grid-template-columns: 1fr; }
             table { display: block; overflow-x: auto; }
+            .question-row { grid-template-columns: 1fr; }
+            .metric-grid { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
     </style>
 </head>

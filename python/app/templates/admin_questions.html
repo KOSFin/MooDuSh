@@ -19,33 +19,31 @@
 </form>
 
 <section class="panel">
-    <table>
-        <thead>
-            <tr>
-                <th>Вопрос</th>
-                <th>Тест</th>
-                <th>Завершений</th>
-                <th>Ответов</th>
-                <th>Обновлён</th>
-            </tr>
-        </thead>
-        <tbody>
+    <div class="question-list">
         {% for item in data.questions %}
-            <tr>
-                <td class="cell-wrap">{{ item.prompt or item.question_key }}<div class="text-muted">{{ item.question_key }}</div></td>
-                <td class="cell-wrap">
-                    <a href="/admin/tests/{{ item.test_key }}">{{ item.title or item.path }}</a>
-                    <div class="text-muted">{{ item.host }}{{ item.path }}</div>
-                </td>
-                <td>{{ item.completed_count }}</td>
-                <td>{{ item.answers_count }}</td>
-                <td class="text-muted">{{ item.updated_at.strftime('%d.%m.%Y %H:%M') if item.updated_at else '-' }}</td>
-            </tr>
+            <article class="question-row">
+                <div class="question-main">
+                    <div class="question-prompt">{{ item.prompt or item.question_key }}</div>
+                    <div class="question-meta">
+                        <span>{{ item.question_key }}</span>
+                        <span>{{ item.updated_at.strftime('%d.%m.%Y %H:%M') if item.updated_at else '-' }}</span>
+                    </div>
+                    <div>
+                        <a class="question-test" href="/admin/tests/{{ item.test_key }}">{{ item.title or item.path }}</a>
+                        <div class="text-muted">{{ item.host }}{{ item.path }}</div>
+                    </div>
+                </div>
+                <div class="metric-grid">
+                    <div class="metric"><span>Завершений</span><strong>{{ item.completed_count }}</strong></div>
+                    <div class="metric"><span>Ответов</span><strong>{{ item.answers_count }}</strong></div>
+                    <div class="metric"><span>Подтв.</span><strong>{{ item.verified_count }}</strong></div>
+                    <div class="metric"><span>Выборов</span><strong>{{ item.fallback_count }}</strong></div>
+                </div>
+            </article>
         {% else %}
-            <tr><td colspan="5" class="empty">Вопросы не найдены.</td></tr>
+            <div class="empty">Вопросы не найдены.</div>
         {% endfor %}
-        </tbody>
-    </table>
+    </div>
 </section>
 
 {% if data.total > page_size %}

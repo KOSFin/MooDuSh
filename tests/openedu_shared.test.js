@@ -122,6 +122,35 @@ test('buildStableQuestionKeyBase changes when answer set changes', () => {
     assert.notEqual(first, second);
 });
 
+test('sanitizeQuestionPrompt removes paramEXT inline widget artifacts', () => {
+    const prompt = openeduShared.sanitizeQuestionPrompt(
+        '|*?paramEXTВставить правильные ответыВставить популярные ответыОтветыорганизация и проведение спортивных соревнований1организация культурного досуга1Методы досуговой реабилитации людей с ограниченными возможностями:',
+        [
+            'организация и проведение спортивных соревнований',
+            'организация культурного досуга'
+        ]
+    );
+
+    assert.equal(prompt, 'Методы досуговой реабилитации людей с ограниченными возможностями:');
+});
+
+test('buildQuestionFingerprint ignores stripped prompt artifacts', () => {
+    const answers = [
+        'организация и проведение спортивных соревнований',
+        'организация культурного досуга'
+    ];
+    const clean = openeduShared.buildQuestionFingerprint(
+        'Методы досуговой реабилитации людей с ограниченными возможностями:',
+        answers
+    );
+    const dirty = openeduShared.buildQuestionFingerprint(
+        '|*?paramEXTВставить правильные ответыВставить популярные ответыОтветыорганизация и проведение спортивных соревнований1организация культурного досуга1Методы досуговой реабилитации людей с ограниченными возможностями:',
+        answers
+    );
+
+    assert.equal(dirty, clean);
+});
+
 test('shouldRetainRenderedAnswers keeps UI during transient empty rerender after submit', () => {
     const keepUi = openeduShared.shouldRetainRenderedAnswers({
         questionCount: 0,

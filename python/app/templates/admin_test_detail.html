@@ -15,34 +15,39 @@
     <article class="card"><p>Пользователей</p><h3>{{ data.counters.unique_users }}</h3></article>
 </section>
 
-<div class="grid-2">
-    <section class="panel">
-        <div class="panel-head"><h2>Вопросы</h2></div>
-        <table>
-            <thead><tr><th>Вопрос</th><th>Завершений</th><th>Ответов</th><th>Подтв.</th><th>Выборов</th></tr></thead>
-            <tbody>
-            {% for q in data.questions %}
-                <tr>
-                    <td class="cell-wrap">{{ q.prompt or q.question_key }}<div class="text-muted">{{ q.updated_at.strftime('%d.%m.%Y %H:%M') if q.updated_at else '-' }}</div></td>
-                    <td>{{ q.completed_count }}</td>
-                    <td>{{ q.answers_count }}</td>
-                    <td>{{ q.verified_count }}</td>
-                    <td>{{ q.fallback_count }}</td>
-                </tr>
-            {% else %}
-                <tr><td colspan="5" class="empty">Вопросов пока нет.</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        {% if data.total_questions > page_size %}
-        <div class="pagination">
-            {% for p in range(1, (data.total_questions + page_size - 1) // page_size + 1) %}
-                <a href="/admin/tests/{{ data.test.test_key }}?page={{ p }}" class="{% if p == page %}active{% endif %}">{{ p }}</a>
-            {% endfor %}
-        </div>
-        {% endif %}
-    </section>
+<section class="panel">
+    <div class="panel-head"><h2>Вопросы</h2></div>
+    <div class="question-list">
+        {% for q in data.questions %}
+            <article class="question-row">
+                <div class="question-main">
+                    <div class="question-prompt">{{ q.prompt or q.question_key }}</div>
+                    <div class="question-meta">
+                        <span>{{ q.question_key }}</span>
+                        <span>{{ q.updated_at.strftime('%d.%m.%Y %H:%M') if q.updated_at else '-' }}</span>
+                    </div>
+                </div>
+                <div class="metric-grid">
+                    <div class="metric"><span>Завершений</span><strong>{{ q.completed_count }}</strong></div>
+                    <div class="metric"><span>Ответов</span><strong>{{ q.answers_count }}</strong></div>
+                    <div class="metric"><span>Подтв.</span><strong>{{ q.verified_count }}</strong></div>
+                    <div class="metric"><span>Выборов</span><strong>{{ q.fallback_count }}</strong></div>
+                </div>
+            </article>
+        {% else %}
+            <div class="empty">Вопросов пока нет.</div>
+        {% endfor %}
+    </div>
+    {% if data.total_questions > page_size %}
+    <div class="pagination">
+        {% for p in range(1, (data.total_questions + page_size - 1) // page_size + 1) %}
+            <a href="/admin/tests/{{ data.test.test_key }}?page={{ p }}" class="{% if p == page %}active{% endif %}">{{ p }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</section>
 
+<div class="grid-2">
     <section class="panel">
         <div class="panel-head"><h2>Пользователи теста</h2></div>
         <table>

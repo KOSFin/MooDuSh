@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 from fastapi import Depends, FastAPI
@@ -17,10 +18,14 @@ from .telegram import spawn_forward
 async def lifespan(_: FastAPI):
     await database.connect()
     set_database_ref(database)
-    await start_bot(database)
+    repair_task = asyncio.create_task(database.run_repair_worker())
     try:
+        await start_bot(database)
         yield
     finally:
+        repair_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await repair_task
         await stop_bot()
         await database.disconnect()
 

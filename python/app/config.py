@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     database_password: str = Field(default='paramext', alias='DATABASE_PASSWORD')
     database_min_connections: int = Field(default=4, alias='DATABASE_MIN_CONNECTIONS')
     database_max_connections: int = Field(default=40, alias='DATABASE_MAX_CONNECTIONS')
+    database_repair_interval_seconds: int = Field(default=300, alias='DATABASE_REPAIR_INTERVAL_SECONDS')
 
     api_bearer_token: str = Field(default='', alias='API_BEARER_TOKEN')
     api_token: str = Field(default='', alias='API_TOKEN')

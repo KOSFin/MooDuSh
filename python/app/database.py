@@ -1,4 +1,6 @@
+import asyncio
 import hashlib
+import html
 import json
 import re
 import uuid
@@ -10,19 +12,134 @@ from .config import settings
 
 _NORM_PUNCT_RE = re.compile(r'[^\w\s]', re.UNICODE)
 _NORM_WS_RE = re.compile(r'\s+')
+_ZERO_WIDTH_RE = re.compile(r'[\u200b-\u200f\ufeff]')
+_QUESTION_UI_RE = re.compile(r'(\|\*\~?\??|\?+\s*(?=paramEXT|Вставить)|похож\.)', re.IGNORECASE)
+_TRAILING_COUNT_RE = re.compile(r'(^|\s)\d+(?=\s|$)')
+_QUESTION_UI_PHRASES = sorted(
+    [
+        'Вставить популярные ответы похожего вопроса',
+        'Вставить популярный ответ похожего вопроса',
+        'Вставить правильные ответы',
+        'Вставить правильный ответ',
+        'Вставить популярные ответы',
+        'Вставить популярный ответ',
+        'Вставить ответы похожего вопроса',
+        'Вставить ответ похожего вопроса',
+        'Нет точных ответов, только похожие данные.',
+        'Нет статистики по этому вопросу.',
+        'Для этого вопроса пока нет своей статистики.',
+        'Точный ответ для этого вопроса не найден.',
+        'Показаны данные похожего вопроса.',
+        'Похожий вопрос',
+        'Этот вопрос',
+        'paramEXT OpenEdu',
+        'paramEXT',
+        'Пока нет ответов.',
+        'Ответы',
+    ],
+    key=len,
+    reverse=True,
+)
+
+
+def collapse_whitespace(value: Any) -> str:
+    return _NORM_WS_RE.sub(' ', html.unescape(str(value or ''))).strip()
+
+
+def _strip_question_ui_phrases(value: str) -> str:
+    text = _ZERO_WIDTH_RE.sub(' ', str(value or ''))
+    text = _QUESTION_UI_RE.sub(' ', text)
+    for phrase in _QUESTION_UI_PHRASES:
+        text = re.sub(re.escape(phrase), ' ', text, flags=re.IGNORECASE)
+    return text
+
+
+def _has_question_ui_artifact(value: str) -> bool:
+    text = str(value or '')
+    if _QUESTION_UI_RE.search(text):
+        return True
+    lowered = text.lower()
+    return any(phrase.lower() in lowered for phrase in _QUESTION_UI_PHRASES)
+
+
+def _strip_answer_text_artifacts(text: str, answer_texts: list[str] | None) -> str:
+    result = str(text or '')
+    seen: set[str] = set()
+    answers: list[str] = []
+    for answer_text in answer_texts or []:
+        answer = collapse_whitespace(answer_text)
+        answer_norm = answer.lower()
+        if not answer or len(answer_norm) < 4 or answer_norm in seen:
+            continue
+        seen.add(answer_norm)
+        answers.append(answer)
+
+    for answer in sorted(answers, key=len, reverse=True):
+        result = re.sub(
+            re.escape(answer) + r'\s*\d*(?=\s|$|\D)',
+            ' ',
+            result,
+            flags=re.IGNORECASE,
+        )
+    return result
+
+
+def sanitize_question_prompt(prompt: str, answer_texts: list[str] | None = None) -> str:
+    raw = collapse_whitespace(prompt)
+    if not raw:
+        return ''
+
+    had_ui_artifact = _has_question_ui_artifact(raw)
+    text = _strip_question_ui_phrases(raw)
+
+    answers = answer_texts or []
+    answer_hits = 0
+    for answer_text in answers:
+        answer = collapse_whitespace(answer_text)
+        if len(answer) >= 4 and answer in text:
+            answer_hits += 1
+
+    should_strip_answers = had_ui_artifact or answer_hits >= 2 or (answer_hits >= 1 and len(raw) > 240)
+    if should_strip_answers:
+        text = _strip_answer_text_artifacts(text, answers)
+
+    text = re.sub(
+        r'\b(верно|неверно|правильно|неправильно|correct|incorrect|true|false)\s*:\s*',
+        ' ',
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r'\s*\b(верно|неверно|правильно|неправильно|correct|incorrect|true|false)\b\s*$',
+        ' ',
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r'\s+([?.!,;:])', r'\1', text)
+    if should_strip_answers:
+        text = _TRAILING_COUNT_RE.sub(' ', text)
+
+    cleaned = collapse_whitespace(text)
+    return cleaned or raw
+
+
+def sanitize_answer_text(answer_text: str) -> str:
+    text = collapse_whitespace(_strip_question_ui_phrases(answer_text))
+    return re.sub(r'\s+([?.!,;:])', r'\1', text)
 
 
 def normalize_prompt(prompt: str) -> str:
-    text = _NORM_PUNCT_RE.sub('', prompt)
+    text = _NORM_PUNCT_RE.sub('', sanitize_question_prompt(prompt))
     return _NORM_WS_RE.sub(' ', text).strip().lower()
 
 
 def normalize_answer_text(answer_text: str) -> str:
-    return normalize_prompt(answer_text)
+    text = _NORM_PUNCT_RE.sub('', sanitize_answer_text(answer_text))
+    return _NORM_WS_RE.sub(' ', text).strip().lower()
 
 
 def compute_question_fingerprint(prompt: str, answer_texts: list[str]) -> str:
-    prompt_norm = normalize_prompt(prompt)
+    prompt_norm = normalize_prompt(sanitize_question_prompt(prompt, answer_texts))
     normalized_answers: list[str] = []
     seen: set[str] = set()
 
@@ -182,6 +299,7 @@ class Database:
                 "ALTER TABLE openedu_participant_question_state ADD COLUMN IF NOT EXISTS user_id BIGINT DEFAULT NULL",
                 "ALTER TABLE openedu_questions ADD COLUMN IF NOT EXISTS prompt_norm TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE openedu_questions ADD COLUMN IF NOT EXISTS question_fingerprint TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE openedu_answer_stats ADD COLUMN IF NOT EXISTS answer_norm TEXT NOT NULL DEFAULT ''",
             ]:
                 await conn.execute(stmt)
 
@@ -203,11 +321,14 @@ class Database:
                     ON openedu_questions (test_key, question_fingerprint) WHERE question_fingerprint != ''
                 """
             )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_openedu_stats_answer_norm
+                    ON openedu_answer_stats (test_key, question_key, answer_norm) WHERE answer_norm != ''
+                """
+            )
 
-        # Backfill prompt_norm using Python (SQL \w doesn't handle Cyrillic).
-        await self._backfill_prompt_norms()
-        await self._backfill_question_fingerprints()
-        await self._merge_duplicate_openedu_questions()
+        await self.repair_openedu_data()
 
     async def _backfill_prompt_norms(self) -> None:
         assert self.pool is not None
@@ -278,6 +399,277 @@ class Database:
                     updates,
                 )
 
+    async def _sanitize_openedu_questions(self, limit: int = 10000) -> int:
+        assert self.pool is not None
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    q.test_key,
+                    q.question_key,
+                    q.prompt,
+                    COALESCE(array_agg(s.answer_text) FILTER (WHERE s.answer_text != ''), '{}') AS answer_texts
+                FROM openedu_questions q
+                LEFT JOIN openedu_answer_stats s
+                    ON s.test_key = q.test_key
+                    AND s.question_key = q.question_key
+                WHERE q.prompt != ''
+                  AND (
+                    q.prompt ILIKE '%paramEXT%'
+                    OR q.prompt ILIKE '%Вставить%'
+                    OR q.prompt ILIKE '%Нет статистики%'
+                    OR q.prompt ILIKE '%Ответы%'
+                    OR length(q.prompt) > 240
+                  )
+                GROUP BY q.test_key, q.question_key, q.prompt
+                ORDER BY q.updated_at DESC
+                LIMIT $1
+                """,
+                limit,
+            )
+            updates = []
+            for row in rows:
+                answer_texts = [sanitize_answer_text(str(item or '')) for item in (row['answer_texts'] or [])]
+                clean_prompt = sanitize_question_prompt(str(row['prompt'] or ''), answer_texts)
+                if not clean_prompt or clean_prompt == str(row['prompt'] or ''):
+                    continue
+                updates.append(
+                    (
+                        clean_prompt,
+                        normalize_prompt(clean_prompt),
+                        compute_question_fingerprint(clean_prompt, answer_texts),
+                        row['test_key'],
+                        row['question_key'],
+                    )
+                )
+
+            if not updates:
+                return 0
+
+            await conn.executemany(
+                """
+                UPDATE openedu_questions
+                SET prompt = $1,
+                    prompt_norm = $2,
+                    question_fingerprint = $3,
+                    updated_at = NOW()
+                WHERE test_key = $4 AND question_key = $5
+                """,
+                updates,
+            )
+            return len(updates)
+
+    async def _sanitize_openedu_answer_stats(self, limit: int = 10000) -> int:
+        assert self.pool is not None
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT test_key, question_key, answer_key, answer_text, answer_norm
+                FROM openedu_answer_stats
+                WHERE answer_norm = ''
+                   OR answer_text ILIKE '%paramEXT%'
+                   OR answer_text ILIKE '%Вставить%'
+                ORDER BY updated_at DESC
+                LIMIT $1
+                """,
+                limit,
+            )
+            updates = []
+            for row in rows:
+                answer_text = sanitize_answer_text(str(row['answer_text'] or ''))
+                answer_norm = normalize_answer_text(answer_text)
+                if answer_text == str(row['answer_text'] or '') and answer_norm == str(row['answer_norm'] or ''):
+                    continue
+                updates.append(
+                    (
+                        answer_text,
+                        answer_norm,
+                        row['test_key'],
+                        row['question_key'],
+                        row['answer_key'],
+                    )
+                )
+
+            if not updates:
+                return 0
+
+            await conn.executemany(
+                """
+                UPDATE openedu_answer_stats
+                SET answer_text = $1,
+                    answer_norm = $2,
+                    updated_at = NOW()
+                WHERE test_key = $3 AND question_key = $4 AND answer_key = $5
+                """,
+                updates,
+            )
+            return len(updates)
+
+    async def _backfill_answer_norms(self) -> None:
+        assert self.pool is not None
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT test_key, question_key, answer_key, answer_text
+                FROM openedu_answer_stats
+                WHERE answer_norm = '' AND answer_text != ''
+                LIMIT 5000
+                """
+            )
+            updates = []
+            for row in rows:
+                answer_norm = normalize_answer_text(str(row['answer_text'] or ''))
+                if not answer_norm:
+                    continue
+                updates.append(
+                    (
+                        answer_norm,
+                        row['test_key'],
+                        row['question_key'],
+                        row['answer_key'],
+                    )
+                )
+            if updates:
+                await conn.executemany(
+                    """
+                    UPDATE openedu_answer_stats
+                    SET answer_norm = $1
+                    WHERE test_key = $2 AND question_key = $3 AND answer_key = $4
+                    """,
+                    updates,
+                )
+
+    def _pick_answer_text(self, current: str, candidate: str) -> str:
+        current_text = sanitize_answer_text(current)
+        candidate_text = sanitize_answer_text(candidate)
+        if not current_text:
+            return candidate_text
+        if not candidate_text:
+            return current_text
+        if _has_question_ui_artifact(current_text) and not _has_question_ui_artifact(candidate_text):
+            return candidate_text
+        if len(candidate_text) > len(current_text) and len(current_text) < 4:
+            return candidate_text
+        return current_text
+
+    async def _merge_duplicate_openedu_answers(self) -> None:
+        assert self.pool is not None
+        async with self.pool.acquire() as conn:
+            groups = await conn.fetch(
+                """
+                SELECT test_key, question_key, answer_norm, array_agg(answer_key ORDER BY answer_key) AS answer_keys
+                FROM openedu_answer_stats
+                WHERE answer_norm != ''
+                GROUP BY test_key, question_key, answer_norm
+                HAVING COUNT(*) > 1
+                LIMIT 300
+                """
+            )
+            if not groups:
+                return
+
+            async with conn.transaction():
+                for group in groups:
+                    test_key = group['test_key']
+                    question_key = group['question_key']
+                    answer_norm = group['answer_norm']
+                    rows = await conn.fetch(
+                        """
+                        SELECT answer_key, answer_text, verified_count, fallback_count, updated_at
+                        FROM openedu_answer_stats
+                        WHERE test_key = $1 AND question_key = $2 AND answer_norm = $3
+                        ORDER BY (verified_count + fallback_count) DESC, updated_at DESC, answer_key ASC
+                        """,
+                        test_key,
+                        question_key,
+                        answer_norm,
+                    )
+                    if len(rows) < 2:
+                        continue
+
+                    canonical = rows[0]
+                    canonical_key = canonical['answer_key']
+                    answer_text = str(canonical['answer_text'] or '')
+
+                    for duplicate in rows[1:]:
+                        duplicate_key = duplicate['answer_key']
+                        if duplicate_key == canonical_key:
+                            continue
+
+                        answer_text = self._pick_answer_text(answer_text, str(duplicate['answer_text'] or ''))
+                        await conn.execute(
+                            """
+                            UPDATE openedu_answer_stats
+                            SET verified_count = verified_count + $4,
+                                fallback_count = fallback_count + $5,
+                                answer_text = $6,
+                                answer_norm = $7,
+                                updated_at = NOW()
+                            WHERE test_key = $1 AND question_key = $2 AND answer_key = $3
+                            """,
+                            test_key,
+                            question_key,
+                            canonical_key,
+                            int(duplicate['verified_count'] or 0),
+                            int(duplicate['fallback_count'] or 0),
+                            answer_text,
+                            answer_norm,
+                        )
+                        await conn.execute(
+                            """
+                            UPDATE openedu_participant_question_state
+                            SET selected_answer_keys = ARRAY(
+                                    SELECT DISTINCT item
+                                    FROM unnest(array_replace(selected_answer_keys, $4, $3)) AS item
+                                    WHERE item != ''
+                                    ORDER BY item
+                                ),
+                                verified_answer_keys = ARRAY(
+                                    SELECT DISTINCT item
+                                    FROM unnest(array_replace(verified_answer_keys, $4, $3)) AS item
+                                    WHERE item != ''
+                                    ORDER BY item
+                                ),
+                                updated_at = NOW()
+                            WHERE test_key = $1 AND question_key = $2
+                              AND ($4 = ANY(selected_answer_keys) OR $4 = ANY(verified_answer_keys))
+                            """,
+                            test_key,
+                            question_key,
+                            canonical_key,
+                            duplicate_key,
+                        )
+                        await conn.execute(
+                            """
+                            DELETE FROM openedu_answer_stats
+                            WHERE test_key = $1 AND question_key = $2 AND answer_key = $3
+                            """,
+                            test_key,
+                            question_key,
+                            duplicate_key,
+                        )
+
+    async def repair_openedu_data(self) -> dict[str, int]:
+        """Normalize old OpenEdu rows and collapse safe duplicates."""
+        fixed_questions = await self._sanitize_openedu_questions()
+        fixed_answers = await self._sanitize_openedu_answer_stats()
+        await self._backfill_prompt_norms()
+        await self._backfill_answer_norms()
+        await self._backfill_question_fingerprints()
+        await self._merge_duplicate_openedu_answers()
+        await self._merge_duplicate_openedu_questions()
+        await self._merge_duplicate_openedu_answers()
+        return {'questions': fixed_questions, 'answers': fixed_answers}
+
+    async def run_repair_worker(self) -> None:
+        interval = max(30, int(settings.database_repair_interval_seconds or 300))
+        while True:
+            try:
+                await self.repair_openedu_data()
+            except Exception as exc:
+                print(f'OpenEdu repair worker failed: {exc}')
+            await asyncio.sleep(interval)
+
     async def _merge_duplicate_openedu_questions(self) -> None:
         """Collapse old OpenEdu rows that only differ by unstable question keys."""
         assert self.pool is not None
@@ -313,7 +705,7 @@ class Database:
                     for duplicate_key in duplicate_keys:
                         stat_rows = await conn.fetch(
                             """
-                            SELECT answer_key, answer_text, verified_count, fallback_count
+                            SELECT answer_key, answer_text, answer_norm, verified_count, fallback_count
                             FROM openedu_answer_stats
                             WHERE test_key = $1 AND question_key = $2
                             """,
@@ -324,10 +716,11 @@ class Database:
                             await conn.execute(
                                 """
                                 INSERT INTO openedu_answer_stats
-                                    (test_key, question_key, answer_key, answer_text, verified_count, fallback_count, updated_at)
-                                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                                    (test_key, question_key, answer_key, answer_text, answer_norm, verified_count, fallback_count, updated_at)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                                 ON CONFLICT (test_key, question_key, answer_key)
                                 DO UPDATE SET answer_text = COALESCE(NULLIF(openedu_answer_stats.answer_text, ''), EXCLUDED.answer_text),
+                                              answer_norm = COALESCE(NULLIF(openedu_answer_stats.answer_norm, ''), EXCLUDED.answer_norm),
                                               verified_count = openedu_answer_stats.verified_count + EXCLUDED.verified_count,
                                               fallback_count = openedu_answer_stats.fallback_count + EXCLUDED.fallback_count,
                                               updated_at = NOW()
@@ -336,6 +729,7 @@ class Database:
                                 canonical_key,
                                 row['answer_key'],
                                 row['answer_text'],
+                                row['answer_norm'] or normalize_answer_text(str(row['answer_text'] or '')),
                                 int(row['verified_count'] or 0),
                                 int(row['fallback_count'] or 0),
                             )
@@ -472,30 +866,130 @@ class Database:
 
     @staticmethod
     def _compute_attempt_fingerprint(context: dict, questions: list, actor_key: str) -> str:
+        normalized_questions = []
+        for q in questions:
+            raw_answers = q.get('answers', []) if isinstance(q, dict) else []
+            answer_texts = [
+                sanitize_answer_text(str(a.get('answerText') or ''))
+                for a in raw_answers
+                if isinstance(a, dict)
+            ]
+            question_identity = compute_question_fingerprint(
+                str(q.get('prompt') or '') if isinstance(q, dict) else '',
+                answer_texts,
+            ) or (str(q.get('questionKey') or '') if isinstance(q, dict) else '')
+            normalized_questions.append(
+                {
+                    'questionIdentity': question_identity,
+                    'isCorrect': bool(q.get('isCorrect')) if isinstance(q, dict) else False,
+                    'answers': sorted(
+                        [
+                            {
+                                'answerIdentity': normalize_answer_text(str(a.get('answerText') or '')) or str(a.get('answerKey') or ''),
+                                'selected': bool(a.get('selected')),
+                                'correct': bool(a.get('correct')),
+                            }
+                            for a in raw_answers
+                            if isinstance(a, dict)
+                        ],
+                        key=lambda a: a['answerIdentity'],
+                    ),
+                }
+            )
+
         blob = json.dumps({
             'actorKey': actor_key,
             'testKey': context.get('testKey', ''),
             'path': context.get('path', ''),
-            'questions': [
-                {
-                    'questionKey': q.get('questionKey', ''),
-                    'isCorrect': bool(q.get('isCorrect')),
-                    'answers': sorted(
-                        [
-                            {
-                                'answerKey': a.get('answerKey', ''),
-                                'selected': bool(a.get('selected')),
-                                'correct': bool(a.get('correct')),
-                            }
-                            for a in q.get('answers', [])
-                        ],
-                        key=lambda a: a['answerKey'],
-                    ),
-                }
-                for q in questions
-            ],
+            'questions': sorted(normalized_questions, key=lambda q: q['questionIdentity']),
         }, sort_keys=True)
         return hashlib.sha256(blob.encode()).hexdigest()[:32]
+
+    async def _resolve_storage_question_key(
+        self,
+        conn,
+        test_key: str,
+        question_key: str,
+        prompt_norm: str,
+        question_fingerprint: str,
+    ) -> str:
+        if question_fingerprint:
+            existing_by_content = await conn.fetchrow(
+                """
+                SELECT question_key
+                FROM openedu_questions
+                WHERE test_key = $1
+                  AND question_fingerprint = $2
+                  AND question_fingerprint != ''
+                ORDER BY completed_count DESC, updated_at DESC, question_key ASC
+                LIMIT 1
+                """,
+                test_key,
+                question_fingerprint,
+            )
+            if existing_by_content:
+                return str(existing_by_content['question_key'])
+
+        existing_by_key = await conn.fetchrow(
+            """
+            SELECT prompt_norm, question_fingerprint
+            FROM openedu_questions
+            WHERE test_key = $1 AND question_key = $2
+            """,
+            test_key,
+            question_key,
+        )
+        if not existing_by_key:
+            return question_key
+
+        stored_fingerprint = str(existing_by_key['question_fingerprint'] or '')
+        stored_prompt_norm = str(existing_by_key['prompt_norm'] or '')
+        fingerprint_conflict = bool(
+            question_fingerprint
+            and stored_fingerprint
+            and stored_fingerprint != question_fingerprint
+        )
+        prompt_conflict = bool(
+            question_fingerprint
+            and prompt_norm
+            and stored_prompt_norm
+            and stored_prompt_norm != prompt_norm
+        )
+        if not fingerprint_conflict and not prompt_conflict:
+            return question_key
+
+        suffix = (question_fingerprint or hashlib.sha256(prompt_norm.encode('utf-8')).hexdigest())[:10]
+        return f'{question_key}_fp_{suffix}'
+
+    async def _resolve_storage_answer_key(
+        self,
+        conn,
+        test_key: str,
+        question_key: str,
+        answer_key: str,
+        answer_norm: str,
+    ) -> str:
+        if not answer_norm:
+            return answer_key
+
+        existing = await conn.fetchrow(
+            """
+            SELECT answer_key
+            FROM openedu_answer_stats
+            WHERE test_key = $1
+              AND question_key = $2
+              AND answer_norm = $3
+              AND answer_norm != ''
+            ORDER BY (verified_count + fallback_count) DESC, updated_at DESC, answer_key ASC
+            LIMIT 1
+            """,
+            test_key,
+            question_key,
+            answer_norm,
+        )
+        if existing:
+            return str(existing['answer_key'])
+        return answer_key
 
     async def upsert_openedu_attempt(self, payload: dict[str, Any], user_id: int | None = None) -> None:
         assert self.pool is not None
@@ -565,22 +1059,60 @@ class Database:
                     if has_explicit_correct_answers and selected_answers_count <= 1 and explicit_correct_answers_count > 1:
                         has_explicit_correct_answers = False
 
-                    answer_text_by_key: dict[str, str] = {}
-                    selected_answer_keys: set[str] = set()
-                    current_verified_answer_keys: set[str] = set()
-
+                    raw_answer_entries: list[dict[str, Any]] = []
                     for answer in answers:
                         answer_key = str(answer.get('answerKey') or '').strip()
                         if not answer_key:
                             continue
-                        answer_text_by_key[answer_key] = str(answer.get('answerText') or '').strip()
-                        if bool(answer.get('selected')):
+                        answer_text = sanitize_answer_text(str(answer.get('answerText') or ''))
+                        answer_norm = normalize_answer_text(answer_text)
+                        raw_answer_entries.append(
+                            {
+                                'answer_key': answer_key,
+                                'answer_text': answer_text,
+                                'answer_norm': answer_norm,
+                                'selected': bool(answer.get('selected')),
+                                'correct': bool(answer.get('correct')),
+                            }
+                        )
+
+                    answer_texts = [entry['answer_text'] for entry in raw_answer_entries if entry['answer_text']]
+                    prompt_raw = sanitize_question_prompt(str(question.get('prompt') or ''), answer_texts)
+                    prompt_norm = normalize_prompt(prompt_raw)
+                    question_fingerprint = compute_question_fingerprint(prompt_raw, answer_texts)
+                    question_key = await self._resolve_storage_question_key(
+                        conn,
+                        context['testKey'],
+                        question_key,
+                        prompt_norm,
+                        question_fingerprint,
+                    )
+
+                    answer_text_by_key: dict[str, str] = {}
+                    answer_norm_by_key: dict[str, str] = {}
+                    selected_answer_keys: set[str] = set()
+                    current_verified_answer_keys: set[str] = set()
+
+                    for entry in raw_answer_entries:
+                        answer_key = await self._resolve_storage_answer_key(
+                            conn,
+                            context['testKey'],
+                            question_key,
+                            entry['answer_key'],
+                            entry['answer_norm'],
+                        )
+                        answer_text_by_key[answer_key] = self._pick_answer_text(
+                            answer_text_by_key.get(answer_key, ''),
+                            entry['answer_text'],
+                        )
+                        answer_norm_by_key[answer_key] = entry['answer_norm']
+                        if entry['selected']:
                             selected_answer_keys.add(answer_key)
                         if (
                             question_correct
                             and has_explicit_correct_answers
-                            and bool(answer.get('selected'))
-                            and bool(answer.get('correct'))
+                            and entry['selected']
+                            and entry['correct']
                         ):
                             current_verified_answer_keys.add(answer_key)
 
@@ -610,21 +1142,17 @@ class Database:
                     if question_correct and not prev_is_correct:
                         completed_delta = 1
 
-                    prompt_raw = question.get('prompt', '')
-                    prompt_norm = normalize_prompt(prompt_raw)
-                    question_fingerprint = compute_question_fingerprint(
-                        str(prompt_raw or ''),
-                        list(answer_text_by_key.values()),
-                    )
-
                     await conn.execute(
                         """
                         INSERT INTO openedu_questions (test_key, question_key, prompt, prompt_norm, question_fingerprint, completed_count, updated_at)
                         VALUES ($1, $2, $3, $4, $5, $6, NOW())
                         ON CONFLICT (test_key, question_key)
-                        DO UPDATE SET prompt = EXCLUDED.prompt,
-                                      prompt_norm = EXCLUDED.prompt_norm,
-                                      question_fingerprint = EXCLUDED.question_fingerprint,
+                        DO UPDATE SET prompt = CASE
+                                          WHEN EXCLUDED.prompt != '' THEN EXCLUDED.prompt
+                                          ELSE openedu_questions.prompt
+                                      END,
+                                      prompt_norm = COALESCE(NULLIF(EXCLUDED.prompt_norm, ''), openedu_questions.prompt_norm),
+                                      question_fingerprint = COALESCE(NULLIF(EXCLUDED.question_fingerprint, ''), openedu_questions.question_fingerprint),
                                       completed_count = GREATEST(0, openedu_questions.completed_count + $6),
                                       updated_at = NOW()
                         """,
@@ -649,16 +1177,18 @@ class Database:
                             continue
                         await conn.execute(
                             """
-                            INSERT INTO openedu_answer_stats (test_key, question_key, answer_key, answer_text, verified_count, fallback_count, updated_at)
-                            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                            INSERT INTO openedu_answer_stats (test_key, question_key, answer_key, answer_text, answer_norm, verified_count, fallback_count, updated_at)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                             ON CONFLICT (test_key, question_key, answer_key)
-                            DO UPDATE SET answer_text = EXCLUDED.answer_text,
+                            DO UPDATE SET answer_text = COALESCE(NULLIF(EXCLUDED.answer_text, ''), openedu_answer_stats.answer_text),
+                                          answer_norm = COALESCE(NULLIF(EXCLUDED.answer_norm, ''), openedu_answer_stats.answer_norm),
                                           verified_count = openedu_answer_stats.verified_count + EXCLUDED.verified_count,
                                           fallback_count = openedu_answer_stats.fallback_count + EXCLUDED.fallback_count,
                                           updated_at = NOW()
                             """,
                             context['testKey'], question_key, answer_key,
                             answer_text_by_key.get(answer_key, ''),
+                            answer_norm_by_key.get(answer_key, ''),
                             verified_inc, selected_inc,
                         )
 
@@ -940,7 +1470,8 @@ class Database:
                 continue
 
             overlap_ratio = overlap_count / max(len(original_norms), 1)
-            if overlap_ratio < 0.34:
+            jaccard_ratio = overlap_count / max(len(original_norms | candidate_norms), 1)
+            if overlap_ratio < 0.75 or jaccard_ratio < 0.6:
                 continue
 
             current = best_match.get(original_key)
@@ -1307,7 +1838,9 @@ class Database:
                         t.host,
                         t.path,
                         t.title,
-                        COUNT(a.answer_key) AS answers_count
+                        COUNT(a.answer_key) AS answers_count,
+                        COALESCE(SUM(a.verified_count), 0) AS verified_count,
+                        COALESCE(SUM(a.fallback_count), 0) AS fallback_count
                     FROM openedu_questions q
                     LEFT JOIN openedu_tests t ON t.test_key = q.test_key
                     LEFT JOIN openedu_answer_stats a
@@ -1338,7 +1871,9 @@ class Database:
                         t.host,
                         t.path,
                         t.title,
-                        COUNT(a.answer_key) AS answers_count
+                        COUNT(a.answer_key) AS answers_count,
+                        COALESCE(SUM(a.verified_count), 0) AS verified_count,
+                        COALESCE(SUM(a.fallback_count), 0) AS fallback_count
                     FROM openedu_questions q
                     LEFT JOIN openedu_tests t ON t.test_key = q.test_key
                     LEFT JOIN openedu_answer_stats a

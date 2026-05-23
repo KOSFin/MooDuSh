@@ -10,6 +10,13 @@
     const QUESTION_ROOT_SELECTOR = '[data-problem-id], .problem, .xblock-student_view-problem, .problems-wrapper, .wrapper-problem-response, fieldset, [role="group"], .choicegroup, [id^="problem_"]';
     const QUESTION_GROUP_SELECTOR = 'fieldset, .question, .subquestion, .problem-question, .wrapper-problem-response, .choicegroup, .answers, .options, .response, .answer';
     const OPTION_LABEL_SELECTOR = 'label.response-label, label.field-label, .choicegroup label[for], label[for], label';
+    const PARAMEXT_WIDGET_SELECTOR = [
+        '.paramext-openedu-inline-menu',
+        '.paramext-openedu-inline-popover',
+        '.paramext-openedu-wand-toggle',
+        '.paramext-openedu-stick',
+        '[' + INLINE_WAND_ATTR + ']'
+    ].join(', ');
     const MAX_ANSWERS_PER_QUESTION = 50;
     const RETRY_DELAYS_MS = [0, 350, 900];
     const MIN_CYCLE_GAP_MS = 10000;
@@ -290,6 +297,8 @@
         return {
             collapseWhitespace: collapseWhitespaceLocal,
             normalizeText: normalizeTextLocal,
+            sanitizeQuestionPrompt: (value) => collapseWhitespaceLocal(value),
+            sanitizeAnswerText: (value) => collapseWhitespaceLocal(value),
             deriveOptionAnswerText: deriveOptionAnswerTextLocal,
             buildStableQuestionKeyBase: buildStableQuestionKeyBaseLocal,
             matchesQuestionReference: matchesQuestionReferenceLocal
@@ -415,7 +424,17 @@
     });
 
     function textOf(node) {
-        return (node && node.textContent ? node.textContent : '').replace(/\s+/g, ' ').trim();
+        if (!node) {
+            return '';
+        }
+
+        if (node instanceof Element) {
+            const clone = node.cloneNode(true);
+            clone.querySelectorAll(PARAMEXT_WIDGET_SELECTOR).forEach((item) => item.remove());
+            return (clone.textContent || '').replace(/\s+/g, ' ').trim();
+        }
+
+        return (node.textContent || '').replace(/\s+/g, ' ').trim();
     }
 
     function collapseWhitespace(value) {
@@ -430,6 +449,20 @@
             return openeduShared.normalizeText(value);
         }
         return collapseWhitespace(value).toLowerCase();
+    }
+
+    function sanitizeQuestionPromptText(value, answerTexts) {
+        if (typeof openeduShared.sanitizeQuestionPrompt === 'function') {
+            return openeduShared.sanitizeQuestionPrompt(value, answerTexts);
+        }
+        return collapseWhitespace(value);
+    }
+
+    function sanitizeAnswerText(value) {
+        if (typeof openeduShared.sanitizeAnswerText === 'function') {
+            return openeduShared.sanitizeAnswerText(value);
+        }
+        return collapseWhitespace(value);
     }
 
     function hash(input) {
@@ -1443,7 +1476,7 @@
     }
 
     function normalizePromptLikeText(value) {
-        let text = collapseWhitespace(value);
+        let text = sanitizeQuestionPromptText(value);
         if (!text) {
             return '';
         }
@@ -1912,10 +1945,13 @@
         return questions.map((question) => ({
             questionKey: String(question?.questionKey || ''),
             domId: String(question?.domId || ''),
-            prompt: String(question?.prompt || ''),
+            prompt: sanitizeQuestionPromptText(
+                question?.prompt || '',
+                Array.isArray(question?.options) ? question.options.map((option) => option?.answerText || '') : [],
+            ),
             options: Array.isArray(question?.options)
                 ? question.options.map((option) => ({
-                    answerText: String(option?.answerText || '')
+                    answerText: sanitizeAnswerText(option?.answerText || '')
                 }))
                 : []
         }));
@@ -2092,8 +2128,14 @@
                         groupOptions.length,
                     );
                 }
+                const promptAnswerTexts = groupOptions
+                    .map((option) => sanitizeAnswerText(option.answerText))
+                    .filter(Boolean);
                 const nearPrompt = findPromptBeforeNode(root, groupRoot);
-                const prompt = getQuestionPrompt(groupRoot) || nearPrompt || fallbackPrompt;
+                const prompt = sanitizeQuestionPromptText(
+                    getQuestionPrompt(groupRoot) || nearPrompt || fallbackPrompt,
+                    promptAnswerTexts,
+                );
 
                 const scopedDomId = baseDomId + '::' + String(groupId || groupIndex);
                 const locationBucket = Math.round(((groupRoot.getBoundingClientRect().top || root.getBoundingClientRect().top || 0)) / 12);
@@ -2103,7 +2145,7 @@
                 const allowsMultipleAnswers = questionAllowsMultipleAnswers(groupRoot);
                 const stableAnswerTexts = groupOptions
                     .filter((option) => option.inputType !== 'text')
-                    .map((option) => normalizeQuestionOptionText(option.answerText) || String(option.answerText || '').trim())
+                    .map((option) => sanitizeAnswerText(normalizeQuestionOptionText(option.answerText) || String(option.answerText || '').trim()))
                     .filter(Boolean);
                 const textInputCount = groupOptions.filter((option) => option.inputType === 'text').length;
                 const questionKeyBase = buildStableQuestionKeyBase({
@@ -2201,18 +2243,22 @@
             source: 'extension',
             context,
             completed: isWholePageCompleted(questions),
-            questions: questions.map((question) => ({
-                questionKey: question.questionKey,
-                prompt: question.prompt,
-                verified: question.hasVerifiedAnswer,
-                isCorrect: question.correct,
-                answers: question.options.map((option) => ({
-                    answerKey: option.answerKey,
-                    answerText: option.answerText,
-                    selected: option.selected,
-                    correct: option.correct
-                }))
-            }))
+            questions: questions.map((question) => {
+                const answerTexts = question.options.map((option) => sanitizeAnswerText(option.answerText));
+                const prompt = sanitizeQuestionPromptText(question.prompt, answerTexts);
+                return {
+                    questionKey: question.questionKey,
+                    prompt,
+                    verified: question.hasVerifiedAnswer,
+                    isCorrect: question.correct,
+                    answers: question.options.map((option) => ({
+                        answerKey: option.answerKey,
+                        answerText: sanitizeAnswerText(option.answerText),
+                        selected: option.selected,
+                        correct: option.correct
+                    }))
+                };
+            })
         };
 
         debugSync('push_attempt_snapshot_payload', {
@@ -2236,13 +2282,16 @@
         const queryPayload = {
             context,
             questionKeys: questions.map((question) => question.questionKey),
-            questions: questions.map((question) => ({
-                questionKey: question.questionKey,
-                prompt: question.prompt,
-                answers: question.options
-                    .map((option) => String(option.answerText || '').trim())
-                    .filter(Boolean)
-            }))
+            questions: questions.map((question) => {
+                const answers = question.options
+                    .map((option) => sanitizeAnswerText(option.answerText))
+                    .filter(Boolean);
+                return {
+                    questionKey: question.questionKey,
+                    prompt: sanitizeQuestionPromptText(question.prompt, answers),
+                    answers
+                };
+            })
         };
 
         debugSync('pull_statistics_payload', {
@@ -3351,11 +3400,14 @@
                 hasVerifiedAnswer: question.hasVerifiedAnswer,
                 allowsMultipleAnswers: Boolean(question.allowsMultipleAnswers),
                 orderIndex: question.orderIndex,
-                prompt: question.prompt,
+                prompt: sanitizeQuestionPromptText(
+                    question.prompt,
+                    Array.isArray(question.options) ? question.options.map((option) => option.answerText) : [],
+                ),
                 fromIframe: true,
                 options: (Array.isArray(question.options) ? question.options : []).map((option) => ({
                     answerKey: option.answerKey,
-                    answerText: option.answerText,
+                    answerText: sanitizeAnswerText(option.answerText),
                     selected: option.selected,
                     correct: option.correct
                 }))

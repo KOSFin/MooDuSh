@@ -18,6 +18,120 @@
         return collapseWhitespace(value).toLowerCase();
     }
 
+    function escapeRegExp(value) {
+        return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    const QUESTION_UI_PHRASES = [
+        'Вставить популярные ответы похожего вопроса',
+        'Вставить популярный ответ похожего вопроса',
+        'Вставить правильные ответы',
+        'Вставить правильный ответ',
+        'Вставить популярные ответы',
+        'Вставить популярный ответ',
+        'Вставить ответы похожего вопроса',
+        'Вставить ответ похожего вопроса',
+        'Нет точных ответов, только похожие данные.',
+        'Нет статистики по этому вопросу.',
+        'Для этого вопроса пока нет своей статистики.',
+        'Точный ответ для этого вопроса не найден.',
+        'Показаны данные похожего вопроса.',
+        'Похожий вопрос',
+        'Этот вопрос',
+        'paramEXT OpenEdu',
+        'paramEXT',
+        'Пока нет ответов.',
+        'Ответы'
+    ].sort((a, b) => b.length - a.length);
+
+    const QUESTION_UI_RE = /(\|\*\~?\??|\?+\s*(?=paramEXT|Вставить)|похож\.)/gi;
+
+    function containsQuestionUiArtifact(value) {
+        const text = String(value || '');
+        if (QUESTION_UI_RE.test(text)) {
+            QUESTION_UI_RE.lastIndex = 0;
+            return true;
+        }
+        QUESTION_UI_RE.lastIndex = 0;
+        return QUESTION_UI_PHRASES.some((phrase) => text.toLowerCase().includes(phrase.toLowerCase()));
+    }
+
+    function stripQuestionUiPhrases(value) {
+        let text = String(value || '').replace(/[\u200b-\u200f\ufeff]/g, ' ');
+        text = text.replace(QUESTION_UI_RE, ' ');
+        QUESTION_UI_RE.lastIndex = 0;
+
+        QUESTION_UI_PHRASES.forEach((phrase) => {
+            text = text.replace(new RegExp(escapeRegExp(phrase), 'gi'), ' ');
+        });
+
+        return text;
+    }
+
+    function stripAnswerTextArtifacts(text, answerTexts) {
+        let result = String(text || '');
+        const answers = Array.isArray(answerTexts) ? answerTexts : [];
+        const normalizedAnswers = [];
+        const seen = new Set();
+
+        answers.forEach((answerText) => {
+            const answer = collapseWhitespace(answerText);
+            const answerNorm = normalizeText(answer);
+            if (!answer || answerNorm.length < 4 || seen.has(answerNorm)) {
+                return;
+            }
+            seen.add(answerNorm);
+            normalizedAnswers.push(answer);
+        });
+
+        normalizedAnswers
+            .sort((a, b) => b.length - a.length)
+            .forEach((answer) => {
+                result = result.replace(
+                    new RegExp(escapeRegExp(answer) + '\\s*\\d*(?=\\s|$|\\D)', 'giu'),
+                    ' '
+                );
+            });
+
+        return result;
+    }
+
+    function sanitizeQuestionPrompt(value, answerTexts) {
+        const raw = collapseWhitespace(value);
+        if (!raw) {
+            return '';
+        }
+
+        const hadUiArtifact = containsQuestionUiArtifact(raw);
+        let text = stripQuestionUiPhrases(raw);
+
+        const answers = Array.isArray(answerTexts) ? answerTexts : [];
+        const answerHits = answers.reduce((count, answerText) => {
+            const answer = collapseWhitespace(answerText);
+            return answer && answer.length >= 4 && text.includes(answer) ? count + 1 : count;
+        }, 0);
+        const shouldStripAnswers = hadUiArtifact || answerHits >= 2 || (answerHits >= 1 && raw.length > 240);
+        if (shouldStripAnswers) {
+            text = stripAnswerTextArtifacts(text, answers);
+        }
+
+        text = text
+            .replace(/\b(верно|неверно|правильно|неправильно|correct|incorrect|true|false)\s*:\s*/ig, '')
+            .replace(/\s*\b(верно|неверно|правильно|неправильно|correct|incorrect|true|false)\b\s*$/ig, '')
+            .replace(/\s+([?.!,;:])/g, '$1');
+        if (shouldStripAnswers || hadUiArtifact) {
+            text = text.replace(/(^|\s)\d+(?=\s|$)/g, ' ');
+        }
+
+        const cleaned = collapseWhitespace(text);
+        return cleaned || raw;
+    }
+
+    function sanitizeAnswerText(value) {
+        return collapseWhitespace(stripQuestionUiPhrases(value))
+            .replace(/\s+([?.!,;:])/g, '$1');
+    }
+
     function normalizeFingerprintText(value) {
         return collapseWhitespace(String(value || '').replace(fingerprintPunctRe, '')).toLowerCase();
     }
@@ -38,12 +152,13 @@
     }
 
     function buildQuestionFingerprint(prompt, answerTexts) {
-        const promptNorm = normalizeFingerprintText(prompt);
+        const safeAnswerTexts = Array.isArray(answerTexts) ? answerTexts : [];
+        const promptNorm = normalizeFingerprintText(sanitizeQuestionPrompt(prompt, safeAnswerTexts));
         const normalizedAnswers = [];
         const seen = new Set();
 
-        (Array.isArray(answerTexts) ? answerTexts : []).forEach((answerText) => {
-            const answerNorm = normalizeFingerprintText(answerText);
+        safeAnswerTexts.forEach((answerText) => {
+            const answerNorm = normalizeFingerprintText(sanitizeAnswerText(answerText));
             if (!answerNorm || seen.has(answerNorm)) {
                 return;
             }
@@ -63,8 +178,8 @@
     }
 
     function buildStableQuestionKeyBase(payload) {
-        const prompt = String(payload?.prompt || '');
         const answerTexts = Array.isArray(payload?.answerTexts) ? payload.answerTexts : [];
+        const prompt = sanitizeQuestionPrompt(String(payload?.prompt || ''), answerTexts);
         const choiceCount = Math.max(0, Number(payload?.choiceCount || 0));
         const textInputCount = Math.max(0, Number(payload?.textInputCount || 0));
         const allowsMultipleAnswers = Boolean(payload?.allowsMultipleAnswers);
@@ -381,6 +496,8 @@
         collapseWhitespace,
         normalizeText,
         normalizeFingerprintText,
+        sanitizeQuestionPrompt,
+        sanitizeAnswerText,
         normalizeMediaSource,
         deriveOptionAnswerText,
         buildQuestionFingerprint,
