@@ -102,6 +102,7 @@
     let lastMissingAnswerSignature = '';
     let pendingManualAnswerQuestion = null;
     let pendingManualAnswerTimer = 0;
+    let manualAnswerContinuationInFlight = false;
     let contentFallbackBlockedUntil = 0;
     let contentFallbackBlockedReason = '';
     let participantKeyCache = '';
@@ -3035,6 +3036,14 @@
             return;
         }
 
+        if (
+            pendingManualAnswerQuestion
+            && matchesQuestionReference(pendingManualAnswerQuestion, question)
+            && !questionHasAnyUserAnswer(pendingManualAnswerQuestion)
+        ) {
+            return;
+        }
+
         pendingManualAnswerQuestion = question;
         lastMissingAnswerSignature = question.questionKey || question.domId || '';
         lastMissingAnswerActionAt = Date.now();
@@ -3055,7 +3064,7 @@
     }
 
     function scheduleContinueAfterManualAnswer(reason) {
-        if (!pendingManualAnswerQuestion || getMissingAnswerAction() !== 'alert') {
+        if (manualAnswerContinuationInFlight || !pendingManualAnswerQuestion || getMissingAnswerAction() !== 'alert') {
             return;
         }
 
@@ -3069,17 +3078,11 @@
 
         pendingManualAnswerTimer = setTimeout(() => {
             pendingManualAnswerTimer = 0;
+            manualAnswerContinuationInFlight = true;
             const question = pendingManualAnswerQuestion;
             pendingManualAnswerQuestion = null;
 
-            const submitButton = findSubmitButtonForQuestion(question);
-            if (submitButton) {
-                lastSubmitActionAt = Date.now();
-                submitButton.click();
-                schedulePostSubmitSyncs();
-            }
-
-            const delayMs = Math.max(900, Number(settings?.openedu?.autoAdvanceDelayMs || 1800));
+            const delayMs = Math.min(900, Math.max(350, Number(settings?.openedu?.autoAdvanceDelayMs || 700)));
             setTimeout(() => {
                 const refreshedQuestions = parseQuestions()
                     .filter((item) => item?.ownerDocument === document);
@@ -3092,16 +3095,20 @@
                     question
                 );
                 if (nextManualQuestion) {
+                    manualAnswerContinuationInFlight = false;
                     alertManualQuestion(nextManualQuestion, 'manual-answer-next', 1);
                     return;
                 }
 
-                requestNextSequencePage();
+                manualAnswerContinuationInFlight = false;
+                if (!requestNextSequencePage()) {
+                    scheduleCycle(true, 'manual-answer-complete', { allowNetwork: true });
+                }
             }, delayMs);
 
             debugSync('manual_missing_answer_continue', {
                 reason: String(reason || 'manual-answer'),
-                clickedSubmit: Boolean(submitButton),
+                clickedSubmit: false,
                 questionKey: question?.questionKey || ''
             });
         }, 550);
@@ -3353,6 +3360,10 @@
 
     function handleMissingAutoAnswers(questions, statsByQuestion) {
         const action = getMissingAnswerAction();
+        if (manualAnswerContinuationInFlight) {
+            return;
+        }
+
         if (action === 'stop') {
             pendingManualAnswerQuestion = null;
             return;
@@ -3361,6 +3372,14 @@
         const missingQuestions = findMissingAutoAnswerQuestions(questions, statsByQuestion);
         if (missingQuestions.length === 0) {
             pendingManualAnswerQuestion = null;
+            return;
+        }
+
+        if (
+            pendingManualAnswerQuestion
+            && !questionHasAnyUserAnswer(pendingManualAnswerQuestion)
+            && missingQuestions.some((question) => matchesQuestionReference(question, pendingManualAnswerQuestion))
+        ) {
             return;
         }
 
