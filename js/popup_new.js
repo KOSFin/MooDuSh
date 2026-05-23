@@ -52,6 +52,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     let activeBackendPlatform = 'openedu';
+    let autoSaveTimer = 0;
+    let autoSaveInFlight = false;
+    let autoSaveQueued = false;
 
     if (mainLogo) {
         mainLogo.addEventListener('error', () => {
@@ -280,12 +283,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if ((event.key === 'Backspace' || event.key === 'Delete') && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
                 input.value = '';
+                scheduleAutoSave('hotkey-clear');
                 return;
             }
 
             const captured = window.ParamExtSettings.serializeHotkey(event);
             if (captured) {
                 input.value = captured;
+                scheduleAutoSave('hotkey');
             }
         });
     }
@@ -349,6 +354,45 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }, 'popup');
                 }
             });
+        });
+    }
+
+    async function saveCurrentUiState(reason) {
+        if (autoSaveInFlight) {
+            autoSaveQueued = true;
+            return;
+        }
+
+        autoSaveInFlight = true;
+        try {
+            settings = collectStateFromUi();
+            settings = await window.ParamExtSettings.saveSettings(settings);
+            sendToActiveTab({ type: 'SETTINGS_UPDATED', settings, reason: reason || 'auto' });
+        } finally {
+            autoSaveInFlight = false;
+            if (autoSaveQueued) {
+                autoSaveQueued = false;
+                scheduleAutoSave('queued');
+            }
+        }
+    }
+
+    function scheduleAutoSave(reason) {
+        if (autoSaveTimer) {
+            clearTimeout(autoSaveTimer);
+        }
+        autoSaveTimer = setTimeout(() => {
+            autoSaveTimer = 0;
+            saveCurrentUiState(reason);
+        }, 250);
+    }
+
+    function bindAutoSave(control, eventName) {
+        if (!control) {
+            return;
+        }
+        control.addEventListener(eventName, () => {
+            scheduleAutoSave(control.id || eventName);
         });
     }
 
@@ -424,6 +468,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             applyBackendPlatformFields();
+            sendToActiveTab({ type: 'SETTINGS_UPDATED', settings, reason: 'backend-reset' });
             backendPingStatus.textContent = 'Путь по умолчанию применен';
             backendPingStatus.classList.remove('online', 'offline');
         } catch (_) {
@@ -437,18 +482,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     Array.from(moodleModeRadios).forEach((radio) => {
-        radio.addEventListener('change', updateMoodleAutoControls);
+        radio.addEventListener('change', () => {
+            updateMoodleAutoControls();
+            scheduleAutoSave('moodle-mode');
+        });
     });
 
-    platformMoodle.addEventListener('click', () => setPlatform('moodle'));
-    platformOpenedu.addEventListener('click', () => setPlatform('openedu'));
+    Array.from(openeduModeRadios).forEach((radio) => {
+        radio.addEventListener('change', () => {
+            scheduleAutoSave('openedu-mode');
+        });
+    });
+
+    platformMoodle.addEventListener('click', () => {
+        setPlatform('moodle');
+        scheduleAutoSave('platform');
+    });
+    platformOpenedu.addEventListener('click', () => {
+        setPlatform('openedu');
+        scheduleAutoSave('platform');
+    });
     backendPlatformMoodle.addEventListener('click', () => {
         settings = writeBackendFieldsToState(settings);
         setBackendPlatform('moodle');
+        scheduleAutoSave('backend-platform');
     });
     backendPlatformOpenedu.addEventListener('click', () => {
         settings = writeBackendFieldsToState(settings);
         setBackendPlatform('openedu');
+        scheduleAutoSave('backend-platform');
     });
 
     toggleBackendSettingsBtn.addEventListener('click', () => {
@@ -464,11 +526,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     backendResetUrlBtn.addEventListener('click', resetBackendPathToDefault);
 
     btnSave.addEventListener('click', async () => {
-        settings = collectStateFromUi();
-        settings = await window.ParamExtSettings.saveSettings(settings);
+        await saveCurrentUiState('save-button');
         applyStateToUi();
-        sendToActiveTab({ type: 'SETTINGS_UPDATED', settings });
     });
+
+    bindAutoSave(nextBtnSelectorInput, 'input');
+    bindAutoSave(openeduAutoAdvanceDelayMs, 'input');
+    bindAutoSave(backendApiBaseUrl, 'input');
+    bindAutoSave(backendApiToken, 'input');
+    bindAutoSave(backendRequestTimeoutMs, 'input');
+    bindAutoSave(openeduAutoAdvanceEnabled, 'change');
+    bindAutoSave(openeduRequiredCompletionOnly, 'change');
+    bindAutoSave(openeduActiveTabRefreshEnabled, 'change');
+    bindAutoSave(openeduShowFallbackStats, 'change');
+    bindAutoSave(openeduAutoUseSimilarAnswers, 'change');
+    bindAutoSave(openeduMissingAnswerAction, 'change');
 
     btnStart.addEventListener('click', async () => {
         settings.moodle.autoSolving = true;

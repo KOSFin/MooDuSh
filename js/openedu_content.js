@@ -100,6 +100,8 @@
     let lastAutoSubmitByProblem = new Map();
     let lastMissingAnswerActionAt = 0;
     let lastMissingAnswerSignature = '';
+    let pendingManualAnswerQuestion = null;
+    let pendingManualAnswerTimer = 0;
     let contentFallbackBlockedUntil = 0;
     let contentFallbackBlockedReason = '';
     let participantKeyCache = '';
@@ -2783,13 +2785,22 @@
         return settings?.openedu?.mode === 'autoSolve';
     }
 
-    function getAutoVerifiedAnswers(stats) {
+    function getAutoAnswerCandidates(stats) {
         const presentation = getQuestionPresentationState(stats);
         const canUseSimilar = Boolean(settings?.openedu?.autoUseSimilarAnswers);
         if (presentation.isSimilar && !canUseSimilar) {
             return [];
         }
-        return presentation.verifiedAnswers;
+
+        if (presentation.verifiedAnswers.length > 0) {
+            return presentation.verifiedAnswers;
+        }
+
+        if (presentation.isSimilar && canUseSimilar) {
+            return presentation.fallbackAnswers;
+        }
+
+        return [];
     }
 
     function getMissingAnswerAction() {
@@ -2986,6 +2997,68 @@
         return scrollToQuestion(question);
     }
 
+    function questionHasAnyUserAnswer(question) {
+        const block = locateQuestionBlock(question);
+        if (!(block instanceof HTMLElement)) {
+            return false;
+        }
+
+        if (block.querySelector('input[type="radio"]:checked, input[type="checkbox"]:checked')) {
+            return true;
+        }
+
+        return Array.from(block.querySelectorAll('input[type="text"], textarea')).some((input) => {
+            if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLTextAreaElement)) {
+                return false;
+            }
+            return input.value.trim().length > 0;
+        });
+    }
+
+    function isEventInsideQuestion(event, question) {
+        const target = event?.target instanceof Element ? event.target : null;
+        const block = locateQuestionBlock(question);
+        return Boolean(target && block instanceof HTMLElement && block.contains(target));
+    }
+
+    function scheduleContinueAfterManualAnswer(reason) {
+        if (!pendingManualAnswerQuestion || getMissingAnswerAction() !== 'alert') {
+            return;
+        }
+
+        if (!questionHasAnyUserAnswer(pendingManualAnswerQuestion)) {
+            return;
+        }
+
+        if (pendingManualAnswerTimer) {
+            clearTimeout(pendingManualAnswerTimer);
+        }
+
+        pendingManualAnswerTimer = setTimeout(() => {
+            pendingManualAnswerTimer = 0;
+            const question = pendingManualAnswerQuestion;
+            pendingManualAnswerQuestion = null;
+
+            const submitButton = findSubmitButtonForQuestion(question);
+            if (submitButton) {
+                lastSubmitActionAt = Date.now();
+                submitButton.click();
+                schedulePostSubmitSyncs();
+            }
+
+            const delayMs = Math.max(900, Number(settings?.openedu?.autoAdvanceDelayMs || 1800));
+            setTimeout(() => {
+                requestNextSequencePage();
+            }, delayMs);
+
+            debugSync('manual_missing_answer_continue', {
+                reason: String(reason || 'manual-answer'),
+                clickedSubmit: Boolean(submitButton),
+                questionKey: question?.questionKey || ''
+            });
+        }, 550);
+    }
+
     function areMatchingAnswersApplied(block, answers) {
         const matchingData = getMatchingTableData(block);
         if (!matchingData) {
@@ -3091,8 +3164,8 @@
             }
 
             const stats = statsByQuestion?.[question.questionKey] || null;
-            const verifiedAnswers = getAutoVerifiedAnswers(stats);
-            if (verifiedAnswers.length === 0) {
+            const answerCandidates = getAutoAnswerCandidates(stats);
+            if (answerCandidates.length === 0) {
                 return;
             }
 
@@ -3104,8 +3177,8 @@
             knownCount += 1;
             const isMulti = questionAllowsMultipleAnswers(block);
             const payload = isMulti
-                ? verifiedAnswers
-                : [verifiedAnswers[0]];
+                ? answerCandidates
+                : [answerCandidates[0]];
             const mode = isMulti ? 'set-all' : 'add';
 
             if (areAnswersAppliedToQuestion(question, payload)) {
@@ -3168,8 +3241,8 @@
                 }
 
                 const stats = statsByQuestion?.[question.questionKey] || null;
-                const verifiedAnswers = getAutoVerifiedAnswers(stats);
-                if (verifiedAnswers.length === 0) {
+                const answerCandidates = getAutoAnswerCandidates(stats);
+                if (answerCandidates.length === 0) {
                     return false;
                 }
 
@@ -3179,8 +3252,8 @@
                 }
 
                 const payload = questionAllowsMultipleAnswers(block)
-                    ? verifiedAnswers
-                    : [verifiedAnswers[0]];
+                    ? answerCandidates
+                    : [answerCandidates[0]];
                 return areAnswersAppliedToQuestion(question, payload);
             });
             if (!ready) {
@@ -3226,18 +3299,20 @@
             }
 
             const stats = statsByQuestion?.[question.questionKey] || null;
-            return getAutoVerifiedAnswers(stats).length === 0;
+            return getAutoAnswerCandidates(stats).length === 0;
         });
     }
 
     function handleMissingAutoAnswers(questions, statsByQuestion) {
         const action = getMissingAnswerAction();
         if (action === 'stop') {
+            pendingManualAnswerQuestion = null;
             return;
         }
 
         const missingQuestions = findMissingAutoAnswerQuestions(questions, statsByQuestion);
         if (missingQuestions.length === 0) {
+            pendingManualAnswerQuestion = null;
             return;
         }
 
@@ -3254,6 +3329,7 @@
         lastMissingAnswerActionAt = now;
 
         if (action === 'advance') {
+            pendingManualAnswerQuestion = null;
             const clickedNext = requestNextSequencePage();
             if (clickedNext) {
                 debugSync('missing_answer_action', {
@@ -3272,6 +3348,7 @@
         }
 
         if (action === 'alert') {
+            pendingManualAnswerQuestion = missingQuestions[0] || null;
             playMissingAnswerSound();
             scrollToQuestion(missingQuestions[0]);
             debugSync('missing_answer_action', {
@@ -4390,6 +4467,16 @@
     }
 
     function installPageMonitors() {
+        const handleManualAnswerInput = (event) => {
+            if (!pendingManualAnswerQuestion || !isEventInsideQuestion(event, pendingManualAnswerQuestion)) {
+                return;
+            }
+            scheduleContinueAfterManualAnswer(event.type);
+        };
+
+        document.addEventListener('input', handleManualAnswerInput, true);
+        document.addEventListener('change', handleManualAnswerInput, true);
+
         document.addEventListener('click', (event) => {
             const source = event.target instanceof Element ? event.target : null;
             if (!source) {
