@@ -171,8 +171,9 @@
             const kind = normalizeTextLocal(item?.kind || item?.tag || 'media') || 'media';
             const source = normalizeMediaSourceLocal(item?.src || item?.href || '');
             const title = collapseWhitespaceLocal(item?.title || item?.ariaLabel || item?.alt || '');
+            const signature = collapseWhitespaceLocal(item?.signature || item?.fingerprint || '');
             const fileName = getMediaFileNameLocal(source);
-            const primary = fileName || source || title || ('item-' + String(index + 1));
+            const primary = fileName || source || signature || title || ('item-' + String(index + 1));
             return title && title !== primary
                 ? (kind + ':' + primary + ' | ' + title)
                 : (kind + ':' + primary);
@@ -439,6 +440,21 @@
             value |= 0;
         }
         return String(Math.abs(value));
+    }
+
+    function hashStableToken(input) {
+        try {
+            let value = 0xcbf29ce484222325n;
+            const prime = 0x100000001b3n;
+            const source = String(input || '');
+            for (let i = 0; i < source.length; i += 1) {
+                value ^= BigInt(source.charCodeAt(i));
+                value = BigInt.asUintN(64, value * prime);
+            }
+            return value.toString(16).padStart(16, '0');
+        } catch (_) {
+            return hash(input);
+        }
     }
 
     function buildStableQuestionKeyBase(payload) {
@@ -1169,13 +1185,29 @@
         return null;
     }
 
+    function buildMediaNodeSignature(node) {
+        if (!(node instanceof Element)) {
+            return '';
+        }
+
+        const markup = String(node.outerHTML || '').trim();
+        if (!markup) {
+            return '';
+        }
+
+        const normalized = collapseWhitespace(markup
+            .replace(/\s(?:id|class|style|tabindex|role|focusable|aria-[\w-]+|data-[\w-]+)=(?:"[^"]*"|'[^']*')/gi, ''));
+
+        return normalized ? ('h' + hashStableToken(normalized)) : '';
+    }
+
     function collectOptionMediaDescriptors(node) {
         if (!(node instanceof Element)) {
             return [];
         }
 
         const descriptors = [];
-        const mediaNodes = node.querySelectorAll('img, source, video, audio');
+        const mediaNodes = node.querySelectorAll('img, source, video, audio, svg, canvas, object, embed');
         mediaNodes.forEach((mediaNode) => {
             if (!(mediaNode instanceof Element)) {
                 return;
@@ -1187,31 +1219,78 @@
                 || mediaNode.getAttribute('srcset')
                 || mediaNode.getAttribute('data-src')
                 || mediaNode.getAttribute('poster')
+                || mediaNode.getAttribute('data')
+                || mediaNode.getAttribute('href')
+                || mediaNode.getAttribute('xlink:href')
                 || ''
             );
+            const needsStructuralSignature = !source || tag === 'svg' || tag === 'canvas';
 
             descriptors.push({
                 kind: tag,
                 src: source,
                 alt: collapseWhitespace(mediaNode.getAttribute('alt') || ''),
                 title: collapseWhitespace(mediaNode.getAttribute('title') || ''),
-                ariaLabel: collapseWhitespace(mediaNode.getAttribute('aria-label') || '')
+                ariaLabel: collapseWhitespace(mediaNode.getAttribute('aria-label') || ''),
+                signature: needsStructuralSignature ? buildMediaNodeSignature(mediaNode) : ''
             });
         });
 
         return descriptors;
     }
 
-    function getOptionAnswerText(label, input) {
+    function addOptionAlias(aliases, seen, value) {
+        const raw = collapseWhitespace(value);
+        if (!raw) {
+            return;
+        }
+
+        const normalized = normalizeText(raw);
+        if (!normalized || seen.has(normalized)) {
+            return;
+        }
+
+        seen.add(normalized);
+        aliases.push(raw);
+    }
+
+    function getOptionAnswerAliases(label, input, mediaDescriptors, answerText) {
+        const aliases = [];
+        const seen = new Set();
+        const normalizedAnswerText = normalizeText(answerText || '');
+        if (normalizedAnswerText) {
+            seen.add(normalizedAnswerText);
+        }
+
+        addOptionAlias(aliases, seen, label?.getAttribute?.('aria-label') || '');
+        addOptionAlias(aliases, seen, label?.getAttribute?.('title') || '');
+        if (input instanceof HTMLInputElement) {
+            addOptionAlias(aliases, seen, input.value || '');
+        }
+
+        const descriptors = Array.isArray(mediaDescriptors) ? mediaDescriptors : [];
+        descriptors.forEach((descriptor) => {
+            addOptionAlias(aliases, seen, descriptor?.alt || '');
+            addOptionAlias(aliases, seen, descriptor?.title || '');
+            addOptionAlias(aliases, seen, descriptor?.ariaLabel || '');
+        });
+
+        return aliases;
+    }
+
+    function getOptionAnswerText(label, input, mediaDescriptors) {
         const rawText = label instanceof HTMLElement ? textOf(label) : '';
         const cleanRawText = normalizeQuestionOptionText(rawText);
+        const descriptors = Array.isArray(mediaDescriptors)
+            ? mediaDescriptors
+            : collectOptionMediaDescriptors(label);
         if (typeof openeduShared.deriveOptionAnswerText === 'function') {
             return openeduShared.deriveOptionAnswerText({
                 text: cleanRawText,
                 ariaLabel: collapseWhitespace(label?.getAttribute?.('aria-label') || ''),
                 title: collapseWhitespace(label?.getAttribute?.('title') || ''),
                 inputValue: input instanceof HTMLInputElement ? collapseWhitespace(input.value || '') : '',
-                mediaDescriptors: collectOptionMediaDescriptors(label)
+                mediaDescriptors: descriptors
             });
         }
 
@@ -1508,10 +1587,12 @@
                 ? ('c:' + groupPath)
                 : (inputName ? ('n:' + inputName) : ('i:' + String(idx)));
 
-            const answerText = getOptionAnswerText(label, input);
+            const mediaDescriptors = collectOptionMediaDescriptors(label);
+            const answerText = getOptionAnswerText(label, input, mediaDescriptors);
             if (!answerText) {
                 return;
             }
+            const answerAliases = getOptionAnswerAliases(label, input, mediaDescriptors, answerText);
 
             const dedupeKey = groupKey + '|' + (inputId || answerText);
             if (usedKeys.has(dedupeKey)) {
@@ -1524,6 +1605,7 @@
                 answerText,
                 selected: Boolean(input && input.checked),
                 correct: isOptionMarkedCorrect(label, input),
+                answerAliases,
                 inputId,
                 inputName,
                 groupKey,
@@ -1553,6 +1635,7 @@
                 : null;
 
             const answerText = input.value.trim();
+            const answerAliases = getOptionAnswerAliases(label, input, [], answerText);
             const groupContainer = getInputGroupContainer(root, input);
             const groupPath = groupContainer && groupContainer !== root ? buildElementPath(root, groupContainer) : '';
             const groupKey = groupPath
@@ -1570,6 +1653,7 @@
                 answerText,
                 selected: answerText.length > 0,
                 correct: isOptionMarkedCorrect(label, input),
+                answerAliases,
                 inputId,
                 inputName,
                 groupKey,
@@ -1596,16 +1680,19 @@
                 const groupKey = groupPath
                     ? ('c:' + groupPath)
                     : (inputName ? ('n:' + inputName) : ('i:' + String(idx)));
-                const answerText = getOptionAnswerText(label, input);
+                const mediaDescriptors = collectOptionMediaDescriptors(label);
+                const answerText = getOptionAnswerText(label, input, mediaDescriptors);
                 if (!answerText) {
                     return;
                 }
+                const answerAliases = getOptionAnswerAliases(label, input, mediaDescriptors, answerText);
 
                 options.push({
                     answerKey: buildAnswerKey(answerText, input, idx),
                     answerText,
                     selected: Boolean(input.checked),
                     correct: isOptionMarkedCorrect(label, input),
+                    answerAliases,
                     inputId,
                     inputName,
                     groupKey,
@@ -2149,6 +2236,13 @@
     }
 
     function findInputForOption(block, option) {
+        if (option.inputPath) {
+            const byPath = getElementByPath(block, option.inputPath);
+            if (byPath instanceof HTMLInputElement) {
+                return byPath;
+            }
+        }
+
         if (option.inputId) {
             const direct = block.querySelector('#' + escapeSelector(option.inputId));
             if (direct instanceof HTMLInputElement) {
@@ -2232,6 +2326,19 @@
         const resolved = [];
         const seen = new Set();
 
+        function optionMatchesText(option, expectedText) {
+            if (!expectedText) {
+                return false;
+            }
+
+            if (normalizeText(option?.answerText || '') === expectedText) {
+                return true;
+            }
+
+            return (Array.isArray(option?.answerAliases) ? option.answerAliases : [])
+                .some((alias) => normalizeText(alias) === expectedText);
+        }
+
         targets.forEach((target) => {
             const expectedKey = String(target?.answerKey || '').trim();
             const expectedText = normalizeText(target?.answerText || target || '');
@@ -2241,7 +2348,7 @@
                 matched = options.find((option) => option.answerKey === expectedKey) || null;
             }
             if (!matched && expectedText) {
-                matched = options.find((option) => normalizeText(option.answerText) === expectedText) || null;
+                matched = options.find((option) => optionMatchesText(option, expectedText)) || null;
             }
             if (!matched) {
                 return;

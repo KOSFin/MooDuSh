@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -131,7 +132,15 @@ async def start_bot(db: Database) -> None:
         logger.info('TELEGRAM_BOT_TOKEN not set, bot disabled')
         return
 
-    _bot = Bot(token=settings.telegram_bot_token)
+    if settings.telegram_proxy_url:
+        _bot = Bot(
+            token=settings.telegram_bot_token,
+            session=AiohttpSession(proxy=settings.telegram_proxy_url),
+        )
+        logger.info('Telegram bot proxy enabled')
+    else:
+        _bot = Bot(token=settings.telegram_bot_token)
+
     dp = Dispatcher()
     dp.include_router(router)
 

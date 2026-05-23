@@ -106,8 +106,9 @@
         const kind = normalizeText(item?.kind || item?.tag || 'media') || 'media';
         const source = normalizeMediaSource(item?.src || item?.href || '');
         const title = collapseWhitespace(item?.title || item?.ariaLabel || item?.alt || '');
+        const signature = collapseWhitespace(item?.signature || item?.fingerprint || '');
         const fileName = getMediaFileName(source);
-        const primary = fileName || source || title || ('item-' + String(index + 1));
+        const primary = fileName || source || signature || title || ('item-' + String(index + 1));
         return title && title !== primary
             ? (kind + ':' + primary + ' | ' + title)
             : (kind + ':' + primary);

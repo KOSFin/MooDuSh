@@ -35,7 +35,11 @@ async def forward_log_to_telegram(kind: str, payload: dict, system: dict) -> Non
 
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    client_kwargs = {'timeout': 5.0}
+    if settings.telegram_proxy_url:
+        client_kwargs['proxy'] = settings.telegram_proxy_url
+
+    async with httpx.AsyncClient(**client_kwargs) as client:
         try:
             await client.post(url, json=body)
         except Exception:

@@ -23,6 +23,19 @@ test('deriveOptionAnswerText builds stable token for image-only answers', () => 
     assert.equal(answerText, 'img:t1.1.1.jpg');
 });
 
+test('deriveOptionAnswerText builds stable token for inline svg answers', () => {
+    const answerText = openeduShared.deriveOptionAnswerText({
+        text: '',
+        mediaDescriptors: [{
+            kind: 'svg',
+            signature: 'hdiagram123',
+            title: 'Схема'
+        }]
+    });
+
+    assert.equal(answerText, 'svg:hdiagram123 | Схема');
+});
+
 test('matchesQuestionReference falls back to prompt and options when question key changes', () => {
     const candidate = {
         questionKey: 'new-key',

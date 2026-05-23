@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default='', alias='TELEGRAM_BOT_TOKEN')
     telegram_chat_id: str = Field(default='', alias='TELEGRAM_CHAT_ID')
     telegram_topic_id: int = Field(default=0, alias='TELEGRAM_TOPIC_ID')
+    telegram_proxy_url: str = Field(default='', alias='TELEGRAM_PROXY_URL')
 
 
 settings = Settings()

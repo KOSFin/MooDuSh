@@ -45,6 +45,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       TELEGRAM_TOPIC_ID: ${TELEGRAM_TOPIC_ID:-0}
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
     # ports:  # No external port publishing
     #   - "8000:8000"
     healthcheck:
