@@ -103,6 +103,7 @@
     let pendingManualAnswerQuestion = null;
     let pendingManualAnswerTimer = 0;
     let manualAnswerContinuationInFlight = false;
+    let manualAnswerSoundPlayed = false;
     let contentFallbackBlockedUntil = 0;
     let contentFallbackBlockedReason = '';
     let participantKeyCache = '';
@@ -3047,13 +3048,18 @@
         pendingManualAnswerQuestion = question;
         lastMissingAnswerSignature = question.questionKey || question.domId || '';
         lastMissingAnswerActionAt = Date.now();
-        playMissingAnswerSound();
+        const shouldPlaySound = source !== 'manual-answer-next' && !manualAnswerSoundPlayed;
+        if (shouldPlaySound) {
+            playMissingAnswerSound();
+            manualAnswerSoundPlayed = true;
+        }
         scrollToQuestion(question);
         debugSync('missing_answer_action', {
             action: 'alert',
             source: String(source || 'missing-answer'),
             missingCount: Math.max(1, Number(missingCount || 1)),
-            questionKey: question?.questionKey || ''
+            questionKey: question?.questionKey || '',
+            sound: shouldPlaySound
         });
     }
 
@@ -3101,8 +3107,10 @@
                 }
 
                 manualAnswerContinuationInFlight = false;
-                if (!requestNextSequencePage()) {
+                if (isOpeneduAutoSolveMode() && !requestNextSequencePage()) {
                     scheduleCycle(true, 'manual-answer-complete', { allowNetwork: true });
+                } else if (!isOpeneduAutoSolveMode()) {
+                    scheduleCycle(true, 'manual-answer-queue-complete', { allowNetwork: true });
                 }
             }, delayMs);
 
@@ -3352,6 +3360,9 @@
             if (!question || question.correct) {
                 return false;
             }
+            if (questionHasAnyUserAnswer(question)) {
+                return false;
+            }
 
             const stats = statsByQuestion?.[question.questionKey] || null;
             return getAutoAnswerCandidates(stats).length === 0;
@@ -3397,6 +3408,16 @@
 
         if (action === 'advance') {
             pendingManualAnswerQuestion = null;
+            if (!isOpeneduAutoSolveMode()) {
+                debugSync('missing_answer_action', {
+                    action,
+                    missingCount: missingQuestions.length,
+                    clickedNext: false,
+                    reason: 'auto_insert_mode'
+                });
+                return;
+            }
+
             const clickedNext = requestNextSequencePage();
             if (clickedNext) {
                 debugSync('missing_answer_action', {
