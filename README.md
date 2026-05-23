@@ -100,7 +100,7 @@ git pull --ff-only
 
 ### Шаг 1: Зарегистрируйтесь в боте
 
-1. Откройте Telegram-бота: **[@moodush_bot](https://t.me/moodush_bot)**
+1. Откройте Telegram-бота: **[@moodush_bot](https://t.me/paramext_bot)**
 2. Нажмите **Start** или отправьте команду `/start`
 3. Бот ответит сообщением с вашим персональным токеном — скопируйте его
 
