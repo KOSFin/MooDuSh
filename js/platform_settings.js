@@ -26,6 +26,7 @@
             stickHotkey: 'Alt+KeyS',
             autoAdvanceEnabled: false,
             activeTabRefreshEnabled: true,
+            activeTabPostSubmitRefreshEnabled: false,
             autoAdvanceDelayMs: 1800,
             requiredCompletionOnly: true,
             showFallbackStats: true,
@@ -118,6 +119,7 @@
             next.openedu.stickHotkey = normalizeHotkey(openedu.stickHotkey, next.openedu.stickHotkey);
             next.openedu.autoAdvanceEnabled = Boolean(openedu.autoAdvanceEnabled);
             next.openedu.activeTabRefreshEnabled = Boolean(openedu.activeTabRefreshEnabled);
+            next.openedu.activeTabPostSubmitRefreshEnabled = Boolean(openedu.activeTabPostSubmitRefreshEnabled);
             next.openedu.requiredCompletionOnly = Boolean(openedu.requiredCompletionOnly);
             next.openedu.showFallbackStats = Boolean(openedu.showFallbackStats);
             next.openedu.autoUseSimilarAnswers = Boolean(openedu.autoUseSimilarAnswers);

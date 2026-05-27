@@ -15,6 +15,69 @@ _NORM_WS_RE = re.compile(r'\s+')
 _ZERO_WIDTH_RE = re.compile(r'[\u200b-\u200f\ufeff]')
 _QUESTION_UI_RE = re.compile(r'(\|\*\~?\??|\?+\s*(?=MooDuSh|Вставить)|похож\.)', re.IGNORECASE)
 _TRAILING_COUNT_RE = re.compile(r'(^|\s)\d+(?=\s|$)')
+_TEX_COMMANDS = {
+    'Alpha': 'Α',
+    'Beta': 'Β',
+    'Gamma': 'Γ',
+    'Delta': 'Δ',
+    'Epsilon': 'Ε',
+    'Zeta': 'Ζ',
+    'Eta': 'Η',
+    'Theta': 'Θ',
+    'Iota': 'Ι',
+    'Kappa': 'Κ',
+    'Lambda': 'Λ',
+    'Mu': 'Μ',
+    'Nu': 'Ν',
+    'Xi': 'Ξ',
+    'Omicron': 'Ο',
+    'Pi': 'Π',
+    'Rho': 'Ρ',
+    'Sigma': 'Σ',
+    'Tau': 'Τ',
+    'Upsilon': 'Υ',
+    'Phi': 'Φ',
+    'Chi': 'Χ',
+    'Psi': 'Ψ',
+    'Omega': 'Ω',
+    'alpha': 'α',
+    'beta': 'β',
+    'gamma': 'γ',
+    'delta': 'δ',
+    'epsilon': 'ε',
+    'varepsilon': 'ε',
+    'zeta': 'ζ',
+    'eta': 'η',
+    'theta': 'θ',
+    'vartheta': 'θ',
+    'iota': 'ι',
+    'kappa': 'κ',
+    'lambda': 'λ',
+    'mu': 'μ',
+    'nu': 'ν',
+    'xi': 'ξ',
+    'omicron': 'ο',
+    'pi': 'π',
+    'rho': 'ρ',
+    'sigma': 'σ',
+    'tau': 'τ',
+    'upsilon': 'υ',
+    'phi': 'φ',
+    'varphi': 'φ',
+    'chi': 'χ',
+    'psi': 'ψ',
+    'omega': 'ω',
+    'times': '×',
+    'cdot': '·',
+    'le': '≤',
+    'leq': '≤',
+    'ge': '≥',
+    'geq': '≥',
+    'neq': '≠',
+    'ne': '≠',
+    'pm': '±',
+    'infty': '∞',
+}
 _QUESTION_UI_PHRASES = sorted(
     [
         'Вставить популярные ответы похожего вопроса',
@@ -44,6 +107,36 @@ _QUESTION_UI_PHRASES = sorted(
 
 def collapse_whitespace(value: Any) -> str:
     return _NORM_WS_RE.sub(' ', html.unescape(str(value or ''))).strip()
+
+
+def normalize_tex_math_text(value: Any) -> str:
+    text = html.unescape(str(value or ''))
+    for _ in range(3):
+        next_text = re.sub(r'\\\(([\s\S]*?)\\\)', r'\1', text)
+        next_text = re.sub(r'\\\[([\s\S]*?)\\\]', r'\1', next_text)
+        next_text = re.sub(r'\$\$([\s\S]*?)\$\$', r'\1', next_text)
+        next_text = re.sub(r'(^|[^\w$])\$([^$\n]+)\$', r'\1\2', next_text)
+        if next_text == text:
+            break
+        text = next_text
+
+    for _ in range(4):
+        next_text = re.sub(r'\\(?:text|mathrm|mathbf|mathit|mathsf|textrm)\s*\{([^{}]*)\}', r'\1', text)
+        next_text = re.sub(r'\{([^{}]*)\}', r'\1', next_text)
+        if next_text == text:
+            break
+        text = next_text
+
+    text = re.sub(r'\\[,;:! ]', ' ', text)
+    text = re.sub(
+        r'\\([A-Za-z]+)\b',
+        lambda match: _TEX_COMMANDS.get(match.group(1), match.group(1)),
+        text,
+    )
+    text = re.sub(r'\\([{}()[\],.;:+\-*/=])', r'\1', text)
+    text = re.sub(r'\s+([)\],.;:])', r'\1', text)
+    text = re.sub(r'([([])\s+', r'\1', text)
+    return collapse_whitespace(text)
 
 
 def _strip_question_ui_phrases(value: str) -> str:
@@ -85,7 +178,7 @@ def _strip_answer_text_artifacts(text: str, answer_texts: list[str] | None) -> s
 
 
 def sanitize_question_prompt(prompt: str, answer_texts: list[str] | None = None) -> str:
-    raw = collapse_whitespace(prompt)
+    raw = normalize_tex_math_text(prompt)
     if not raw:
         return ''
 
@@ -124,7 +217,7 @@ def sanitize_question_prompt(prompt: str, answer_texts: list[str] | None = None)
 
 
 def sanitize_answer_text(answer_text: str) -> str:
-    text = collapse_whitespace(_strip_question_ui_phrases(answer_text))
+    text = normalize_tex_math_text(_strip_question_ui_phrases(answer_text))
     return re.sub(r'\s+([?.!,;:])', r'\1', text)
 
 
@@ -423,6 +516,8 @@ class Database:
                     OR q.prompt ILIKE '%Вставить%'
                     OR q.prompt ILIKE '%Нет статистики%'
                     OR q.prompt ILIKE '%Ответы%'
+                    OR POSITION(chr(92) IN q.prompt) > 0
+                    OR q.prompt LIKE '%$%'
                     OR length(q.prompt) > 240
                   )
                 GROUP BY q.test_key, q.question_key, q.prompt
@@ -473,6 +568,8 @@ class Database:
                 WHERE answer_norm = ''
                    OR answer_text ILIKE '%MooDuSh%'
                    OR answer_text ILIKE '%Вставить%'
+                   OR POSITION(chr(92) IN answer_text) > 0
+                   OR answer_text LIKE '%$%'
                 ORDER BY updated_at DESC
                 LIMIT $1
                 """,

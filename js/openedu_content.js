@@ -6,7 +6,7 @@
     const INLINE_WAND_ATTR = 'data-moodush-openedu-inline-wand';
     const INLINE_MENU_CLASS = 'moodush-openedu-inline-menu';
     const WAND_VISIBILITY_KEY = 'paramExtOpeneduWandsHidden';
-    const QUESTION_INPUT_SELECTOR = 'input[type="radio"], input[type="checkbox"], input[type="text"], input[type="hidden"], select';
+    const QUESTION_INPUT_SELECTOR = 'input[type="radio"], input[type="checkbox"], input[type="text"], input[type="hidden"], select, textarea.answer, textarea[name="answer"]';
     const QUESTION_ROOT_SELECTOR = '[data-problem-id], .problem, .xblock-student_view-problem, .problems-wrapper, .wrapper-problem-response, fieldset, [role="group"], .choicegroup, [id^="problem_"]';
     const QUESTION_GROUP_SELECTOR = 'fieldset, .question, .subquestion, .problem-question, .wrapper-problem-response, .choicegroup, .answers, .options, .response, .answer';
     const OPTION_LABEL_SELECTOR = 'label.response-label, label.field-label, .choicegroup label[for], label[for], label';
@@ -34,6 +34,12 @@
     const MISSING_ANSWER_ACTION_COOLDOWN_MS = 12000;
     const BOOTSTRAP_SYNC_DELAYS_MS = [1800, 5200];
     const POST_SUBMIT_SYNC_DELAYS_MS = [2500, 6500];
+    const AUTO_ADVANCE_PARSE_WAIT_MS = 9000;
+    const AUTO_ADVANCE_MIN_POST_NAV_SYNC_MS = 1200;
+    const AUTO_ADVANCE_FORCE_SYNC_MIN_GAP_MS = 1200;
+    const AUTO_ADVANCE_FORCE_SYNC_DELAYS_MS = [250, 1200, 2800, 5200];
+    const AUTO_ADVANCE_WAIT_LOG_COOLDOWN_MS = 1600;
+    const ACTIVE_TAB_POST_SUBMIT_REFRESH_DELAYS_MS = [3000, 8000, 18000];
     const MESSAGE_TRIGGER_THROTTLE_MS = 3000;
     const MUTATION_TRIGGER_THROTTLE_MS = 3000;
     const DEBUG_SYNC_STORAGE_KEY = 'paramExtOpeneduDebug';
@@ -132,10 +138,18 @@
     let lastMessageTriggerAt = 0;
     let lastMutationTriggerAt = 0;
     let lastMeaningfulQuestionsAt = 0;
+    let lastSequenceNavigationAt = Date.now();
+    let lastSequenceNavigationGeneration = 0;
+    let lastSequenceTabKey = '';
+    let lastSequenceForceSyncAt = 0;
+    let lastAutoAdvanceWaitLogAt = 0;
+    let activeTabPostSubmitRefreshGeneration = 0;
+    let activeTabPostSubmitSoundGeneration = 0;
 
     let iframeQuestionsCache = [];
     let topFrameIframeQuestions = null;
     let topFrameIframeStats = null;
+    let topFrameIframeSyncAt = 0;
     let topFrameOnlineState = { online: false, text: 'Wait...' };
     window.__PARAMEXT_TOPFRAME_ONLINE_STATE = topFrameOnlineState;
     let _topContextPromise = null;
@@ -157,12 +171,24 @@
             return String(value || '').replace(/\s+/g, ' ').trim();
         }
 
+        function normalizeTexMathTextLocal(value) {
+            return collapseWhitespaceLocal(String(value || '')
+                .replace(/\\\(([\s\S]*?)\\\)/g, '$1')
+                .replace(/\\\[([\s\S]*?)\\\]/g, '$1')
+                .replace(/\$\$([\s\S]*?)\$\$/g, '$1')
+                .replace(/(^|[^\w$])\$([^$\n]+)\$/g, '$1$2')
+                .replace(/\\Omega\b/g, 'Ω')
+                .replace(/\\omega\b/g, 'ω')
+                .replace(/\\([A-Za-z]+)\b/g, '$1')
+                .replace(/\\([{}()[\],.;:+\-*/=])/g, '$1'));
+        }
+
         function normalizeTextLocal(value) {
             return collapseWhitespaceLocal(value).toLowerCase();
         }
 
         function normalizeFingerprintTextLocal(value) {
-            return collapseWhitespaceLocal(String(value || '').replace(fingerprintPunctRe, '')).toLowerCase();
+            return collapseWhitespaceLocal(normalizeTexMathTextLocal(value).replace(fingerprintPunctRe, '')).toLowerCase();
         }
 
         function hashHex64Local(input, offset) {
@@ -217,12 +243,12 @@
         }
 
         function deriveOptionAnswerTextLocal(payload) {
-            const text = collapseWhitespaceLocal(payload?.text || '');
+            const text = normalizeTexMathTextLocal(payload?.text || '');
             if (text) {
                 return text;
             }
 
-            const labelled = collapseWhitespaceLocal(payload?.ariaLabel || payload?.title || '');
+            const labelled = normalizeTexMathTextLocal(payload?.ariaLabel || payload?.title || '');
             if (labelled) {
                 return labelled;
             }
@@ -417,9 +443,11 @@
             } else if (event.data.type === 'PARAMEXT_OPENEDU_QUESTIONS_SYNC') {
                 topFrameIframeStats = event.data.stats;
                 topFrameIframeQuestions = event.data.questions;
+                topFrameIframeSyncAt = Date.now();
                 debugSync('top_received_iframe_sync', {
                     questionCount: Array.isArray(topFrameIframeQuestions) ? topFrameIframeQuestions.length : 0,
-                    statKeys: topFrameIframeStats && typeof topFrameIframeStats === 'object' ? Object.keys(topFrameIframeStats).length : 0
+                    statKeys: topFrameIframeStats && typeof topFrameIframeStats === 'object' ? Object.keys(topFrameIframeStats).length : 0,
+                    msSinceSequenceNavigation: lastSequenceNavigationAt > 0 ? topFrameIframeSyncAt - lastSequenceNavigationAt : 0
                 });
                 renderStick(topFrameIframeStats, topFrameIframeQuestions);
             } else if (event.data.type === 'PARAMEXT_OPENEDU_STICK_ONLINE') {
@@ -431,7 +459,19 @@
                 if (isAutoAdvanceEnabled()) {
                     requestNextSequencePage();
                 }
+            } else if (event.data.type === 'PARAMEXT_OPENEDU_REFRESH_ACTIVE_TAB_REQUEST') {
+                scheduleActiveTabPostSubmitRefresh(String(event.data.source || 'iframe-request'));
             }
+        } else if (event.data.type === 'PARAMEXT_OPENEDU_FORCE_SYNC') {
+            if (!settings) {
+                setTimeout(() => {
+                    if (settings) {
+                        scheduleCycle(true, String(event.data.source || 'top-force-sync'), { allowNetwork: true });
+                    }
+                }, 500);
+                return;
+            }
+            scheduleCycle(true, String(event.data.source || 'top-force-sync'), { allowNetwork: true });
         } else if (event.data.type === 'PARAMEXT_OPENEDU_SCROLL_QUESTION') {
             const reference = event.data.question || {
                 questionKey: event.data.questionKey,
@@ -1252,7 +1292,7 @@
         }
         return Boolean(host.querySelector(
             QUESTION_INPUT_SELECTOR
-            + ', .adv-app[data-type="MatchingTableVueApp"]'
+            + ', .adv-app[data-initial-data]'
             + ', .wrapper-problem-response'
         ));
     }
@@ -1317,9 +1357,17 @@
             return false;
         }
 
+        if (root.matches('table.drag-table, table.answerPlaceStudent') || root.querySelector('table.drag-table, table.answerPlaceStudent .dragAnswer, .dragAnswer')) {
+            return true;
+        }
+
         const controlCount = root.querySelectorAll(QUESTION_INPUT_SELECTOR).length;
         if (controlCount === 0) {
             return false;
+        }
+
+        if (root.matches('table') || root.querySelector('table')) {
+            return true;
         }
 
         if (root.querySelector('legend, .problem-header, .problem-group-label, .problem-title, .question-title, .choicegroup, .wrapper-problem-response')) {
@@ -1348,7 +1396,7 @@
         while (current && current !== current.ownerDocument.documentElement) {
             if (
                 current instanceof HTMLElement
-                && current.querySelector('.adv-app[data-type="MatchingTableVueApp"][data-initial-data]')
+                && findMatchingTableApp(current)
             ) {
                 return current;
             }
@@ -1359,14 +1407,59 @@
         return container instanceof HTMLElement ? container : null;
     }
 
+    function findTableQuestionRoot(control) {
+        if (!(control instanceof Element)) {
+            return null;
+        }
+
+        const table = control.closest('table');
+        if (!(table instanceof HTMLElement)) {
+            return null;
+        }
+
+        const container = table.closest('.wrapper-problem-response, fieldset, [role="group"], [data-problem-id], .problem, .xblock-student_view-problem, .problems-wrapper');
+        if (container instanceof HTMLElement && container.querySelectorAll(QUESTION_INPUT_SELECTOR).length <= 80) {
+            return container;
+        }
+
+        return table;
+    }
+
+    function findDragMatchingTableProblemRoot(element) {
+        if (!(element instanceof Element)) {
+            return null;
+        }
+
+        const table = element.matches('table.drag-table, table.answerPlaceStudent')
+            ? element
+            : element.closest('table.drag-table, table.answerPlaceStudent');
+        const anchor = table instanceof HTMLElement ? table : element;
+        const container = anchor.closest('.problem, .xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert');
+        if (container instanceof HTMLElement && container.querySelector('table.drag-table, table.answerPlaceStudent .dragAnswer, .dragAnswer')) {
+            return container;
+        }
+
+        return table instanceof HTMLElement ? table : null;
+    }
+
     function findQuestionRoot(control) {
         if (!(control instanceof Element)) {
             return null;
         }
 
+        const dragTableRoot = findDragMatchingTableProblemRoot(control);
+        if (dragTableRoot) {
+            return dragTableRoot;
+        }
+
         const matchingTableRoot = findMatchingTableProblemRoot(control);
         if (matchingTableRoot) {
             return matchingTableRoot;
+        }
+
+        const tableRoot = findTableQuestionRoot(control);
+        if (tableRoot) {
+            return tableRoot;
         }
 
         let current = control;
@@ -1526,16 +1619,39 @@
         if (!(root instanceof HTMLElement)) {
             return null;
         }
-        const app = root.querySelector('.adv-app[data-type="MatchingTableVueApp"][data-initial-data]');
-        if (app instanceof HTMLElement) {
-            return app;
+
+        const apps = root.querySelectorAll('.adv-app[data-initial-data]');
+        for (const app of apps) {
+            if (!(app instanceof HTMLElement)) {
+                continue;
+            }
+            const initialData = parseOpenEduDataLiteral(app.getAttribute('data-initial-data') || '');
+            if (
+                initialData
+                && typeof initialData === 'object'
+                && Array.isArray(initialData.table)
+                && Array.isArray(initialData.answers)
+            ) {
+                return app;
+            }
         }
 
         const container = root.closest('[data-problem-id], .problem, .xblock-student_view-problem, .problems-wrapper');
         if (container instanceof HTMLElement && container !== root) {
-            const scopedApp = container.querySelector('.adv-app[data-type="MatchingTableVueApp"][data-initial-data]');
-            if (scopedApp instanceof HTMLElement) {
-                return scopedApp;
+            const scopedApps = container.querySelectorAll('.adv-app[data-initial-data]');
+            for (const scopedApp of scopedApps) {
+                if (!(scopedApp instanceof HTMLElement)) {
+                    continue;
+                }
+                const initialData = parseOpenEduDataLiteral(scopedApp.getAttribute('data-initial-data') || '');
+                if (
+                    initialData
+                    && typeof initialData === 'object'
+                    && Array.isArray(initialData.table)
+                    && Array.isArray(initialData.answers)
+                ) {
+                    return scopedApp;
+                }
             }
         }
 
@@ -1544,6 +1660,9 @@
 
     function getMatchingTableInput(root) {
         if (!(root instanceof HTMLElement)) {
+            return null;
+        }
+        if (!getMatchingTableApp(root)) {
             return null;
         }
 
@@ -1568,6 +1687,24 @@
             }
             const parsed = parseOpenEduDataLiteral(input.value || '');
             if (parsed && typeof parsed === 'object' && parsed.answer && typeof parsed.answer === 'object') {
+                return input;
+            }
+        }
+
+        for (const input of docInputs) {
+            if (!(input instanceof HTMLInputElement)) {
+                continue;
+            }
+            const type = String(input.type || '').toLowerCase();
+            if (type !== 'text' && type !== 'hidden') {
+                continue;
+            }
+            const name = String(input.name || '').trim();
+            const id = String(input.id || '').trim();
+            if (normalizeText(name) === 'problem_id' || normalizeText(id) === 'problem_id') {
+                continue;
+            }
+            if (name || id || input.closest('.textline, .capa_inputtype, .wrapper-problem-response')) {
                 return input;
             }
         }
@@ -1659,9 +1796,141 @@
         return normalizePromptLikeText(prompt);
     }
 
+    function getDragMatchingTableData(root) {
+        if (!(root instanceof HTMLElement)) {
+            return null;
+        }
+
+        const table = root.matches('table.drag-table, table.answerPlaceStudent')
+            ? root
+            : root.querySelector('table.drag-table, table.answerPlaceStudent');
+        if (!(table instanceof HTMLTableElement) || !table.querySelector('td.cell, th.cell')) {
+            return null;
+        }
+
+        const container = table.closest('.problem, .xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert') || root;
+        if (!(container instanceof HTMLElement)) {
+            return null;
+        }
+
+        const cells = Array.from(table.querySelectorAll('td.cell[id], th.cell[id]'))
+            .filter((cell) => cell instanceof HTMLTableCellElement);
+        const answers = Array.from(container.querySelectorAll('.dragAnswer[id]'))
+            .filter((answer) => answer instanceof HTMLElement);
+        if (cells.length === 0 || answers.length === 0) {
+            return null;
+        }
+
+        const answerBank = Array.from(container.querySelectorAll('.answerPlaceStudent'))
+            .find((node) => node instanceof HTMLElement && !node.matches('table') && node.querySelector('.dragAnswer'));
+        const textarea = container.querySelector('textarea.answer[name="answer"], textarea[name="answer"], textarea.answer');
+
+        return {
+            table,
+            container,
+            cells,
+            answers,
+            answerBank: answerBank instanceof HTMLElement ? answerBank : null,
+            textarea: textarea instanceof HTMLTextAreaElement ? textarea : null
+        };
+    }
+
+    function getDragMatchingCellLabel(cell) {
+        if (!(cell instanceof HTMLTableCellElement)) {
+            return '';
+        }
+
+        const row = cell.parentElement;
+        const cellIndex = getTableCellIndex(cell);
+        const rowText = getTableRowHeaderText(row, cellIndex);
+        if (rowText) {
+            return rowText;
+        }
+
+        const table = cell.closest('table');
+        return getTableColumnHeaderText(table, row, cellIndex);
+    }
+
+    function getDragMatchingAnswerTitle(answerElement) {
+        if (!(answerElement instanceof HTMLElement)) {
+            return '';
+        }
+        return normalizeQuestionOptionText(textOf(answerElement));
+    }
+
+    function buildDragMatchingAnswerKey(cellId, answerId) {
+        return 'drag:' + String(cellId || '') + ':' + String(answerId || '');
+    }
+
+    function buildDragMatchingTableOptions(root) {
+        const dragData = getDragMatchingTableData(root);
+        if (!dragData) {
+            return [];
+        }
+
+        const options = [];
+        const seen = new Set();
+        const tablePath = buildElementPath(root, dragData.table);
+        const groupKey = 'drag-table:' + (dragData.table.id || tablePath || 'table');
+        const wholeTableCorrect = isQuestionCorrect(dragData.container);
+
+        dragData.cells.forEach((cell) => {
+            const cellId = String(cell.id || '').trim();
+            const cellLabel = getDragMatchingCellLabel(cell);
+            if (!cellId || !cellLabel) {
+                return;
+            }
+
+            dragData.answers.forEach((answerElement) => {
+                const answerId = String(answerElement.id || '').trim();
+                const answerTitle = getDragMatchingAnswerTitle(answerElement);
+                if (!answerId || !answerTitle) {
+                    return;
+                }
+
+                const answerText = normalizeQuestionOptionText(cellLabel + ': ' + answerTitle);
+                if (!answerText) {
+                    return;
+                }
+
+                const dedupeKey = cellId + '|' + answerId;
+                if (seen.has(dedupeKey)) {
+                    return;
+                }
+                seen.add(dedupeKey);
+
+                const selected = cell.contains(answerElement);
+                options.push({
+                    answerKey: buildDragMatchingAnswerKey(cellId, answerId),
+                    answerText,
+                    selected,
+                    correct: selected && wholeTableCorrect,
+                    incorrect: false,
+                    answerAliases: [answerTitle, cellLabel].filter(Boolean),
+                    inputId: answerId,
+                    inputName: '',
+                    groupKey,
+                    groupPath: '',
+                    inputPath: buildElementPath(root, answerElement),
+                    inputType: 'drag-table',
+                    dragCellId: cellId,
+                    dragAnswerId: answerId,
+                    dragCellPath: buildElementPath(root, cell),
+                    dragAnswerPath: buildElementPath(root, answerElement)
+                });
+            });
+        });
+
+        return options;
+    }
+
     function isQuestionControl(node) {
         if (node instanceof HTMLSelectElement) {
             return true;
+        }
+
+        if (node instanceof HTMLTextAreaElement) {
+            return node.matches('textarea.answer, textarea[name="answer"]');
         }
 
         if (!(node instanceof HTMLInputElement)) {
@@ -1682,6 +1951,15 @@
         const docs = getSearchDocuments();
 
         docs.forEach((doc) => {
+            doc.querySelectorAll('table.drag-table, table.answerPlaceStudent').forEach((table) => {
+                const root = findDragMatchingTableProblemRoot(table);
+                if (!(root instanceof HTMLElement) || seen.has(root)) {
+                    return;
+                }
+                seen.add(root);
+                result.push(root);
+            });
+
             const controls = doc.querySelectorAll(QUESTION_INPUT_SELECTOR);
             controls.forEach((control) => {
                 if (!isQuestionControl(control)) {
@@ -1709,8 +1987,18 @@
         const labelNode = root.querySelector(
             '.problem-header, .problem-group-label, .wrapper-problem-response p, .wrapper-problem-response h3, .problem-title, .question-title, legend'
         );
-        return normalizePromptLikeText(textOf(labelNode))
+        const localPrompt = normalizePromptLikeText(textOf(labelNode))
             || normalizePromptLikeText(textOf(root.querySelector('h2, h3, p, legend')));
+        if (localPrompt) {
+            return localPrompt;
+        }
+
+        const problemContainer = root.closest('.xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert');
+        if (problemContainer instanceof HTMLElement && problemContainer !== root) {
+            return normalizePromptLikeText(textOf(problemContainer.querySelector('.problem-header, .problem-title, h2, h3, legend')));
+        }
+
+        return '';
     }
 
     function normalizePromptLikeText(value) {
@@ -1761,6 +2049,175 @@
         const fallback = collapseWhitespace(option.value || '');
         const baseText = rawText || fallback;
         return normalizeQuestionOptionText(baseText);
+    }
+
+    function textOfTableCell(cell) {
+        if (!(cell instanceof Element)) {
+            return '';
+        }
+
+        const clone = cell.cloneNode(true);
+        clone.querySelectorAll(
+            PARAMEXT_WIDGET_SELECTOR
+            + ', input, select, option, button'
+            + ', .status, .status-icon, .indicator-container, .sr'
+        ).forEach((node) => node.remove());
+        return normalizeQuestionOptionText(clone.textContent || '');
+    }
+
+    function getTableCellIndex(cell) {
+        if (!(cell instanceof HTMLTableCellElement)) {
+            return -1;
+        }
+        const row = cell.parentElement;
+        if (!(row instanceof HTMLTableRowElement)) {
+            return -1;
+        }
+        return Array.from(row.cells || []).indexOf(cell);
+    }
+
+    function getTableColumnHeaderText(table, row, cellIndex) {
+        if (!(table instanceof HTMLTableElement) || !(row instanceof HTMLTableRowElement) || cellIndex < 0) {
+            return '';
+        }
+
+        const rows = Array.from(table.rows || []);
+        const rowIndex = rows.indexOf(row);
+        for (let ridx = Math.max(0, rowIndex - 1); ridx >= 0; ridx -= 1) {
+            const candidate = rows[ridx]?.cells?.[cellIndex];
+            if (!(candidate instanceof HTMLTableCellElement)) {
+                continue;
+            }
+            if (candidate.tagName.toLowerCase() !== 'th' && !candidate.getAttribute('scope')) {
+                continue;
+            }
+            const text = textOfTableCell(candidate);
+            if (text) {
+                return text;
+            }
+        }
+
+        const firstRow = rows[0];
+        const firstCell = firstRow?.cells?.[cellIndex];
+        return firstCell instanceof HTMLTableCellElement && firstCell !== row.cells[cellIndex]
+            ? textOfTableCell(firstCell)
+            : '';
+    }
+
+    function getTableRowHeaderText(row, cellIndex) {
+        if (!(row instanceof HTMLTableRowElement)) {
+            return '';
+        }
+
+        for (let idx = Math.min(cellIndex - 1, row.cells.length - 1); idx >= 0; idx -= 1) {
+            const cell = row.cells[idx];
+            if (!(cell instanceof HTMLTableCellElement)) {
+                continue;
+            }
+            const text = textOfTableCell(cell);
+            if (text) {
+                return text;
+            }
+        }
+
+        return '';
+    }
+
+    function getTableControlAnswerText(root, control, fallbackIndex) {
+        const doc = root?.ownerDocument || document;
+        const inputId = control instanceof Element ? String(control.id || '').trim() : '';
+        const label = inputId ? doc.querySelector('label[for="' + escapeSelector(inputId) + '"]') : control.closest('label');
+        if (label instanceof HTMLElement) {
+            const labelText = getOptionAnswerText(label, control, collectOptionMediaDescriptors(label));
+            if (labelText) {
+                return labelText;
+            }
+        }
+
+        const cell = control.closest('td, th');
+        const row = control.closest('tr');
+        const table = control.closest('table');
+        const cellText = textOfTableCell(cell);
+        if (cellText) {
+            return cellText;
+        }
+
+        const cellIndex = getTableCellIndex(cell);
+        const rowText = getTableRowHeaderText(row, cellIndex);
+        const colText = getTableColumnHeaderText(table, row, cellIndex);
+        const joined = [rowText, colText].filter(Boolean).join(' / ');
+        if (joined) {
+            return joined;
+        }
+
+        if (control instanceof HTMLInputElement) {
+            return collapseWhitespace(control.value || control.name || control.id || ('option-' + String(fallbackIndex + 1)));
+        }
+
+        if (control instanceof HTMLSelectElement) {
+            return collapseWhitespace(control.name || control.id || ('select-' + String(fallbackIndex + 1)));
+        }
+
+        return '';
+    }
+
+    function buildTabularInputOptions(root, usedKeys) {
+        if (!(root instanceof HTMLElement)) {
+            return [];
+        }
+        if (getMatchingTableData(root)) {
+            return [];
+        }
+        if (!root.matches('table') && !root.querySelector('table')) {
+            return [];
+        }
+
+        const options = [];
+        const localUsedKeys = usedKeys instanceof Set ? usedKeys : new Set();
+        const controls = root.querySelectorAll('table input[type="radio"], table input[type="checkbox"]');
+        controls.forEach((input, idx) => {
+            if (!(input instanceof HTMLInputElement)) {
+                return;
+            }
+
+            const answerText = getTableControlAnswerText(root, input, idx);
+            if (!answerText) {
+                return;
+            }
+
+            const inputId = input.id || '';
+            const inputName = String(input.name || '').trim();
+            const groupKey = inputName
+                ? ('table:' + inputName)
+                : ('table:' + buildElementPath(root, input.closest('table') || root));
+            const dedupeKey = groupKey + '|' + (inputId || answerText);
+            if (localUsedKeys.has(dedupeKey)) {
+                return;
+            }
+            localUsedKeys.add(dedupeKey);
+
+            const label = inputId
+                ? (input.ownerDocument || document).querySelector('label[for="' + escapeSelector(inputId) + '"]')
+                : input.closest('label');
+            const markedState = getOptionMarkedState(label, input);
+
+            options.push({
+                answerKey: buildAnswerKey(answerText, input, idx),
+                answerText,
+                selected: Boolean(input.checked),
+                correct: markedState === true,
+                incorrect: markedState === false,
+                answerAliases: [input.value || ''].filter(Boolean),
+                inputId,
+                inputName,
+                groupKey,
+                groupPath: '',
+                inputPath: buildElementPath(root, input),
+                inputType: input.type === 'checkbox' ? 'checkbox' : 'radio'
+            });
+        });
+
+        return options;
     }
 
     function getMarkerText(label, input) {
@@ -2103,6 +2560,11 @@
             return matchingOptions;
         }
 
+        const dragMatchingOptions = buildDragMatchingTableOptions(root);
+        if (dragMatchingOptions.length > 0) {
+            return dragMatchingOptions;
+        }
+
         const usedKeys = new Set();
 
         const selects = root.querySelectorAll('select');
@@ -2177,6 +2639,10 @@
                     inputType: 'select'
                 });
             });
+        });
+
+        buildTabularInputOptions(root, usedKeys).forEach((option) => {
+            options.push(option);
         });
 
         const labels = root.querySelectorAll(OPTION_LABEL_SELECTOR);
@@ -2327,6 +2793,18 @@
         return options;
     }
 
+    function isFullScoreText(value) {
+        const text = normalizeText(value);
+        const match = text.match(/([0-9]+(?:[.,][0-9]+)?)\s*(?:из|\/)\s*([0-9]+(?:[.,][0-9]+)?)/i);
+        if (!match) {
+            return false;
+        }
+
+        const earned = Number(match[1].replace(',', '.'));
+        const total = Number(match[2].replace(',', '.'));
+        return Number.isFinite(earned) && Number.isFinite(total) && total > 0 && earned >= total;
+    }
+
     function isQuestionCorrect(root) {
         const exact = root.querySelector(
             '.status.correct, .feedback-hint-correct, .message .feedback-hint-correct, .problem-status-correct, [data-correct="true"]'
@@ -2335,10 +2813,16 @@
             return true;
         }
 
-        const statusNode = root.querySelector('.status, .message, .problem-progress, .notification, .feedback, .problem-results');
+        const statusNode = root.querySelector('.status, .message, .problem-progress, .notification, .feedback, .problem-results')
+            || root.closest('.xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert')
+                ?.querySelector('.status, .message, .problem-progress, .notification, .feedback, .problem-results');
         const statusTextRaw = normalizeText(textOf(statusNode));
         if (!statusTextRaw) {
             return false;
+        }
+
+        if (isFullScoreText(statusTextRaw)) {
+            return true;
         }
 
         if (NEGATIVE_MARK_RE.test(statusTextRaw)) {
@@ -2364,7 +2848,7 @@
 
         const normalized = [];
         items.forEach((item) => {
-            const answerText = String(item?.answerText || '').trim();
+            const answerText = sanitizeAnswerText(item?.answerText || '');
             if (!answerText) {
                 return;
             }
@@ -2910,7 +3394,7 @@
         return list.find((question) => matchesQuestionReference(question, reference)) || null;
     }
 
-    function broadcastApplyMessageToChildFrames(payload) {
+    function broadcastOpeneduMessageToChildFrames(payload) {
         let posted = false;
         const frames = document.querySelectorAll('iframe, frame');
         frames.forEach((frame) => {
@@ -2924,6 +3408,10 @@
             }
         });
         return posted;
+    }
+
+    function broadcastApplyMessageToChildFrames(payload) {
+        return broadcastOpeneduMessageToChildFrames(payload);
     }
 
     function requestApplyAnswers(question, answers, mode) {
@@ -3049,6 +3537,9 @@
         if (getMatchingTableData(block)) {
             return true;
         }
+        if (getDragMatchingTableData(block)) {
+            return true;
+        }
         const multiSelects = block.querySelectorAll('select[multiple]');
         if (multiSelects.length > 0) {
             return true;
@@ -3127,9 +3618,10 @@
     }
 
     function setNativeInputValue(input, value) {
-        const nativeSetter = Object.getOwnPropertyDescriptor(
-            HTMLInputElement.prototype, 'value'
-        )?.set;
+        const proto = input instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+        const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
         if (nativeSetter) {
             nativeSetter.call(input, value);
         } else {
@@ -3465,6 +3957,108 @@
         return true;
     }
 
+    function updateDragMatchingTextarea(dragData) {
+        if (!dragData?.textarea) {
+            return;
+        }
+
+        const answer = {};
+        dragData.cells.forEach((cell) => {
+            if (!(cell instanceof HTMLElement) || !cell.id) {
+                return;
+            }
+            const ids = Array.from(cell.querySelectorAll('.dragAnswer[id]'))
+                .map((node) => String(node.id || '').trim())
+                .filter(Boolean);
+            if (ids.length > 0) {
+                answer[cell.id] = ids;
+            }
+        });
+
+        setNativeInputValue(dragData.textarea, JSON.stringify({ answer }));
+        dragData.textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        dragData.textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function dispatchDragMatchingChange(target) {
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        target.dispatchEvent(new Event('sortupdate', { bubbles: true }));
+        target.dispatchEvent(new Event('sortreceive', { bubbles: true }));
+    }
+
+    function applyDragMatchingTableAnswers(block, question, answers, mode) {
+        const dragData = getDragMatchingTableData(block);
+        if (!dragData) {
+            return false;
+        }
+
+        const targets = resolveDragMatchingTargets(block, answers);
+        if (targets.length === 0) {
+            debugSync('apply_answers_failed', {
+                reason: 'drag_matching_targets_not_resolved',
+                questionKey: question?.questionKey || ''
+            });
+            return false;
+        }
+
+        const targetCellIds = new Set(targets.map((target) => target.cellId));
+        const targetAnswerIds = new Set(targets.map((target) => target.answerId));
+        const modeName = typeof mode === 'string' ? mode : 'add';
+        if (modeName === 'set-all' && dragData.answerBank instanceof HTMLElement) {
+            dragData.cells.forEach((cell) => {
+                Array.from(cell.querySelectorAll('.dragAnswer[id]')).forEach((answerElement) => {
+                    if (!(answerElement instanceof HTMLElement) || targetAnswerIds.has(answerElement.id)) {
+                        return;
+                    }
+                    dragData.answerBank.appendChild(answerElement);
+                });
+            });
+        }
+
+        let movedCount = 0;
+        targets.forEach((target) => {
+            const cell = dragData.container.querySelector('#' + escapeSelector(target.cellId));
+            const answerElement = dragData.container.querySelector('#' + escapeSelector(target.answerId));
+            if (!(cell instanceof HTMLElement) || !(answerElement instanceof HTMLElement)) {
+                return;
+            }
+
+            if (modeName === 'set-all') {
+                Array.from(cell.querySelectorAll('.dragAnswer[id]')).forEach((existing) => {
+                    if (!(existing instanceof HTMLElement) || existing.id === target.answerId || !(dragData.answerBank instanceof HTMLElement)) {
+                        return;
+                    }
+                    dragData.answerBank.appendChild(existing);
+                });
+            }
+
+            if (!cell.contains(answerElement)) {
+                cell.appendChild(answerElement);
+                movedCount += 1;
+            }
+            dispatchDragMatchingChange(cell);
+            dispatchDragMatchingChange(answerElement);
+        });
+
+        updateDragMatchingTextarea(dragData);
+        highlightQuestionBlock(block);
+        debugSync('apply_answers_success', {
+            questionKey: question?.questionKey || '',
+            mode: 'drag-table',
+            movedCount,
+            clearedCells: Array.from(targetCellIds),
+            selected: targets.map((item) => ({
+                answerText: item.answerText,
+                answerKey: item.answerKey
+            }))
+        });
+        return true;
+    }
+
     function applySelectAnswers(block, question, answers, mode) {
         const options = getAnswerOptions(block);
         const targets = resolveTargetOptions(options, answers);
@@ -3558,6 +4152,10 @@
 
         if (getMatchingTableData(block)) {
             return applyMatchingTableAnswers(block, question, answers, mode);
+        }
+
+        if (getDragMatchingTableData(block)) {
+            return applyDragMatchingTableAnswers(block, question, answers, mode);
         }
 
         // Text input questions: fill the field directly instead of
@@ -3861,6 +4459,141 @@
         return null;
     }
 
+    function getActiveSequenceTabKey(tabsHost, activeTab) {
+        if (!(tabsHost instanceof Element) || !(activeTab instanceof Element)) {
+            return '';
+        }
+
+        const tabs = Array.from(tabsHost.querySelectorAll('button, a, [role="tab"]'));
+        const index = tabs.indexOf(activeTab);
+        const identity = activeTab.getAttribute('data-id')
+            || activeTab.getAttribute('data-element')
+            || activeTab.getAttribute('aria-controls')
+            || activeTab.getAttribute('href')
+            || activeTab.id
+            || normalizeText(textOf(activeTab))
+            || 'tab';
+        return String(index >= 0 ? index : 0) + ':' + String(identity);
+    }
+
+    function requestSequenceFrameSync(source, now) {
+        if (!isTopFrame) {
+            return;
+        }
+
+        const currentTime = Number(now || Date.now());
+        if (currentTime - lastSequenceForceSyncAt < AUTO_ADVANCE_FORCE_SYNC_MIN_GAP_MS) {
+            return;
+        }
+
+        lastSequenceForceSyncAt = currentTime;
+        broadcastOpeneduMessageToChildFrames({
+            type: 'PARAMEXT_OPENEDU_FORCE_SYNC',
+            source: String(source || 'sequence-sync'),
+            navigationAt: lastSequenceNavigationAt
+        });
+    }
+
+    function markSequenceNavigation(source, activeTabKey) {
+        if (!isTopFrame) {
+            return;
+        }
+
+        const now = Date.now();
+        lastSequenceNavigationAt = now;
+        lastSequenceNavigationGeneration += 1;
+        if (activeTabKey) {
+            lastSequenceTabKey = activeTabKey;
+        }
+
+        debugSync('sequence_navigation_marked', {
+            source: String(source || 'sequence-navigation'),
+            generation: lastSequenceNavigationGeneration,
+            activeTabKey: lastSequenceTabKey
+        });
+
+        AUTO_ADVANCE_FORCE_SYNC_DELAYS_MS.forEach((delayMs) => {
+            setTimeout(() => {
+                requestSequenceFrameSync('sequence-navigation-' + String(source || 'unknown'), Date.now());
+            }, delayMs);
+        });
+    }
+
+    function getStatsAnswerEvidenceCount(stats) {
+        if (!stats || typeof stats !== 'object') {
+            return 0;
+        }
+
+        return ['verifiedAnswers', 'incorrectAnswers', 'fallbackAnswers'].reduce((count, key) => {
+            return count + (Array.isArray(stats[key]) ? stats[key].length : 0);
+        }, 0);
+    }
+
+    function questionHasParsedAnswerEvidence(question, statsByQuestion) {
+        const options = Array.isArray(question?.options) ? question.options : [];
+        const optionEvidence = options.some((option) => {
+            return Boolean(option?.selected || option?.correct || option?.incorrect);
+        });
+        if (optionEvidence) {
+            return true;
+        }
+
+        const stats = statsByQuestion?.[question?.questionKey] || null;
+        return getStatsAnswerEvidenceCount(stats) > 0;
+    }
+
+    function getAutoAdvanceParsingState(now) {
+        const questions = Array.isArray(topFrameIframeQuestions) ? topFrameIframeQuestions : [];
+        const questionCount = questions.length;
+        const answerEvidenceCount = questions.reduce((count, question) => {
+            return count + (questionHasParsedAnswerEvidence(question, topFrameIframeStats) ? 1 : 0);
+        }, 0);
+
+        const navigationAt = Math.max(0, Number(lastSequenceNavigationAt || 0));
+        const minSyncDelay = lastSequenceNavigationGeneration > 0 ? AUTO_ADVANCE_MIN_POST_NAV_SYNC_MS : 0;
+        const syncedAfterNavigation = topFrameIframeSyncAt > 0
+            && topFrameIframeSyncAt >= navigationAt + minSyncDelay;
+
+        return {
+            waitMs: AUTO_ADVANCE_PARSE_WAIT_MS,
+            elapsedMs: navigationAt > 0 ? Math.max(0, Number(now || Date.now()) - navigationAt) : AUTO_ADVANCE_PARSE_WAIT_MS,
+            syncedAfterNavigation,
+            questionCount,
+            answerEvidenceCount,
+            syncAgeMs: topFrameIframeSyncAt > 0 ? Math.max(0, Number(now || Date.now()) - topFrameIframeSyncAt) : 0
+        };
+    }
+
+    function shouldDelayAutoAdvanceForParsing(state) {
+        if (typeof openeduShared.shouldDelayAutoAdvanceForParsing === 'function') {
+            return openeduShared.shouldDelayAutoAdvanceForParsing(state);
+        }
+
+        if (Number(state?.elapsedMs || 0) >= Number(state?.waitMs || 0)) {
+            return false;
+        }
+        if (!state?.syncedAfterNavigation) {
+            return true;
+        }
+        const questionCount = Math.max(0, Number(state?.questionCount || 0));
+        return questionCount > 0 && Math.max(0, Number(state?.answerEvidenceCount || 0)) < questionCount;
+    }
+
+    function shouldWaitBeforeAutoAdvance(now) {
+        const state = getAutoAdvanceParsingState(now);
+        const shouldWait = shouldDelayAutoAdvanceForParsing(state);
+        if (!shouldWait) {
+            return false;
+        }
+
+        requestSequenceFrameSync('auto-advance-wait', now);
+        if (now - lastAutoAdvanceWaitLogAt >= AUTO_ADVANCE_WAIT_LOG_COOLDOWN_MS) {
+            lastAutoAdvanceWaitLogAt = now;
+            debugSync('auto_advance_wait_for_parse', state);
+        }
+        return true;
+    }
+
     function findNextSequenceButton() {
         if (!isTopFrame) {
             return null;
@@ -3902,6 +4635,7 @@
 
         lastAutoAdvanceAt = Date.now();
         nextButton.click();
+        markSequenceNavigation('request-next');
         return true;
     }
 
@@ -3992,6 +4726,10 @@
 
         const selectAnswered = Array.from(block.querySelectorAll('select')).some((select) => selectHasMeaningfulAnswer(select));
         if (selectAnswered) {
+            return true;
+        }
+
+        if (block.querySelector('table.drag-table td.cell .dragAnswer, table.answerPlaceStudent td.cell .dragAnswer')) {
             return true;
         }
 
@@ -4130,6 +4868,64 @@
         });
     }
 
+    function resolveDragMatchingTargets(block, answers) {
+        const options = buildDragMatchingTableOptions(block);
+        if (options.length === 0) {
+            return [];
+        }
+
+        const byKey = new Map();
+        const byText = new Map();
+        options.forEach((option) => {
+            const cellId = String(option.dragCellId || '').trim();
+            const answerId = String(option.dragAnswerId || '').trim();
+            if (!cellId || !answerId) {
+                return;
+            }
+            const target = {
+                cellId,
+                answerId,
+                answerText: String(option.answerText || '').trim(),
+                answerKey: String(option.answerKey || '').trim()
+            };
+            byKey.set(target.answerKey, target);
+            byText.set(normalizeMatchingTargetKey(target.answerText), target);
+        });
+
+        const resolved = [];
+        const seenCells = new Set();
+        (Array.isArray(answers) ? answers : []).forEach((answer) => {
+            const rawKey = String(answer?.answerKey || '').trim();
+            const rawText = String(answer?.answerText || answer || '').trim();
+            const target = byKey.get(rawKey) || byText.get(normalizeMatchingTargetKey(rawText));
+            if (!target || seenCells.has(target.cellId)) {
+                return;
+            }
+            seenCells.add(target.cellId);
+            resolved.push(target);
+        });
+
+        return resolved;
+    }
+
+    function areDragMatchingAnswersApplied(block, answers) {
+        const dragData = getDragMatchingTableData(block);
+        if (!dragData) {
+            return false;
+        }
+
+        const targets = resolveDragMatchingTargets(block, answers);
+        if (targets.length === 0) {
+            return false;
+        }
+
+        return targets.every((target) => {
+            const cell = dragData.container.querySelector('#' + escapeSelector(target.cellId));
+            const answer = dragData.container.querySelector('#' + escapeSelector(target.answerId));
+            return cell instanceof HTMLElement && answer instanceof HTMLElement && cell.contains(answer);
+        });
+    }
+
     function areTextAnswersApplied(block, answers) {
         if (getMatchingTableData(block)) {
             return false;
@@ -4222,6 +5018,10 @@
 
         if (getMatchingTableData(block)) {
             return areMatchingAnswersApplied(block, answers);
+        }
+
+        if (getDragMatchingTableData(block)) {
+            return areDragMatchingAnswersApplied(block, answers);
         }
 
         if (block.querySelector('select') instanceof HTMLSelectElement) {
@@ -4364,6 +5164,7 @@
             lastAutoSubmitByProblem.set(problemKey, now);
             lastSubmitActionAt = now;
             submitButton.click();
+            requestActiveTabPostSubmitRefresh('auto-submit');
             submittedCount += 1;
             debugSync('auto_submit_clicked', {
                 problemKey,
@@ -4441,6 +5242,7 @@
             lastAutoCheckByProblem.set(problemKey, now);
             lastSubmitActionAt = now;
             checkButton.click();
+            requestActiveTabPostSubmitRefresh('auto-check');
             checkedCount += 1;
             debugSync('auto_check_clicked', {
                 problemKey,
@@ -5734,6 +6536,151 @@
         return Boolean(settings?.openedu?.autoAdvanceEnabled);
     }
 
+    function isActiveTabPostSubmitRefreshEnabled() {
+        return Boolean(settings?.openedu?.activeTabPostSubmitRefreshEnabled);
+    }
+
+    function requestActiveTabPostSubmitRefresh(source) {
+        if (!isActiveTabPostSubmitRefreshEnabled()) {
+            return;
+        }
+
+        if (!isTopFrame) {
+            try {
+                window.top.postMessage({
+                    type: 'PARAMEXT_OPENEDU_REFRESH_ACTIVE_TAB_REQUEST',
+                    source: String(source || 'post-submit')
+                }, '*');
+            } catch (_) {
+                // Ignore postMessage failures.
+            }
+            return;
+        }
+
+        scheduleActiveTabPostSubmitRefresh(source);
+    }
+
+    function findActiveSequenceTab() {
+        if (!isTopFrame) {
+            return null;
+        }
+
+        const tabsHost = document.querySelector('.sequence-navigation-tabs');
+        if (!tabsHost) {
+            return null;
+        }
+
+        const activeTab = tabsHost.querySelector('button.active, [role="tab"].active, a.active');
+        return activeTab instanceof HTMLElement ? activeTab : null;
+    }
+
+    function isSequenceTabComplete(tab) {
+        if (!(tab instanceof HTMLElement)) {
+            return false;
+        }
+
+        if (tab.classList.contains('complete')) {
+            return true;
+        }
+
+        return Boolean(tab.querySelector('.text-success, .fa-check, [data-icon="check"]'));
+    }
+
+    function scheduleActiveTabPostSubmitRefresh(source) {
+        if (!isTopFrame || !isActiveTabPostSubmitRefreshEnabled()) {
+            return;
+        }
+
+        const generation = activeTabPostSubmitRefreshGeneration + 1;
+        activeTabPostSubmitRefreshGeneration = generation;
+        const sourceText = String(source || 'post-submit');
+
+        debugSync('active_tab_post_submit_refresh_scheduled', {
+            source: sourceText,
+            generation,
+            delays: ACTIVE_TAB_POST_SUBMIT_REFRESH_DELAYS_MS
+        });
+
+        ACTIVE_TAB_POST_SUBMIT_REFRESH_DELAYS_MS.forEach((delayMs, index) => {
+            setTimeout(() => {
+                if (generation !== activeTabPostSubmitRefreshGeneration || !isActiveTabPostSubmitRefreshEnabled()) {
+                    return;
+                }
+
+                const activeTab = findActiveSequenceTab();
+                if (!(activeTab instanceof HTMLElement)) {
+                    debugSync('active_tab_post_submit_refresh_skipped', {
+                        reason: 'active_tab_not_found',
+                        generation,
+                        attempt: index + 1
+                    });
+                    return;
+                }
+
+                if (isSequenceTabComplete(activeTab)) {
+                    debugSync('active_tab_post_submit_refresh_complete', {
+                        generation,
+                        attempt: index + 1
+                    });
+                    if (isAutoAdvanceEnabled()) {
+                        setTimeout(() => maybeClickNextOnSequencePage(), 300);
+                    }
+                    return;
+                }
+
+                lastActiveTabRefreshAt = Date.now();
+                activeTab.click();
+                requestSequenceFrameSync('active-tab-post-submit-refresh', Date.now());
+                debugSync('active_tab_post_submit_refresh_clicked', {
+                    generation,
+                    attempt: index + 1,
+                    title: activeTab.getAttribute('title') || ''
+                });
+
+                setTimeout(() => {
+                    if (generation !== activeTabPostSubmitRefreshGeneration) {
+                        return;
+                    }
+                    const refreshedTab = findActiveSequenceTab();
+                    if (!isSequenceTabComplete(refreshedTab)) {
+                        return;
+                    }
+                    activeTabPostSubmitRefreshGeneration += 1;
+                    debugSync('active_tab_post_submit_refresh_complete_after_click', {
+                        generation,
+                        attempt: index + 1
+                    });
+                    if (isAutoAdvanceEnabled()) {
+                        maybeClickNextOnSequencePage();
+                    }
+                }, 1600);
+
+                if (index === ACTIVE_TAB_POST_SUBMIT_REFRESH_DELAYS_MS.length - 1) {
+                    setTimeout(() => {
+                        if (generation !== activeTabPostSubmitRefreshGeneration) {
+                            return;
+                        }
+                        const refreshedTab = findActiveSequenceTab();
+                        if (isSequenceTabComplete(refreshedTab)) {
+                            if (isAutoAdvanceEnabled()) {
+                                maybeClickNextOnSequencePage();
+                            }
+                            return;
+                        }
+                        if (activeTabPostSubmitSoundGeneration !== generation) {
+                            activeTabPostSubmitSoundGeneration = generation;
+                            playMissingAnswerSound();
+                            debugSync('active_tab_post_submit_refresh_failed', {
+                                generation,
+                                attempts: ACTIVE_TAB_POST_SUBMIT_REFRESH_DELAYS_MS.length
+                            });
+                        }
+                    }, 1600);
+                }
+            }, delayMs);
+        });
+    }
+
     function maybeClickNextOnSequencePage() {
         if (!isTopFrame) {
             return;
@@ -5750,6 +6697,12 @@
         }
 
         const now = Date.now();
+        const activeTabKey = getActiveSequenceTabKey(tabsHost, activeTab);
+        if (!lastSequenceTabKey) {
+            lastSequenceTabKey = activeTabKey;
+        } else if (activeTabKey && activeTabKey !== lastSequenceTabKey) {
+            markSequenceNavigation('active-tab-changed', activeTabKey);
+        }
 
         const isComplete = activeTab.classList.contains('complete');
         if (!isComplete && settings.openedu.activeTabRefreshEnabled) {
@@ -5773,6 +6726,10 @@
             return;
         }
 
+        if (shouldWaitBeforeAutoAdvance(now)) {
+            return;
+        }
+
         const nextButton = document.querySelector('.next-btn:not([disabled]), .next-button:not([disabled])');
         if (!nextButton) {
             return;
@@ -5780,6 +6737,7 @@
 
         lastAutoAdvanceAt = now;
         nextButton.click();
+        markSequenceNavigation('auto-next');
     }
 
     function installPageMonitors() {
@@ -5804,6 +6762,10 @@
                 return;
             }
 
+            if (isTopFrame && actionable.matches('.sequence-navigation-tabs button, .next-btn, .next-button')) {
+                markSequenceNavigation('navigation-click');
+            }
+
             if (isTopFrame && isAutoAdvanceEnabled() && actionable.matches('.sequence-navigation-tabs button, .next-btn, .next-button')) {
                 setTimeout(() => {
                     maybeClickNextOnSequencePage();
@@ -5815,6 +6777,7 @@
                 || (actionable.matches('.problem button') && /(провер|submit|check|save|отправ|answer)/.test(actionText));
             if (isSubmit) {
                 lastSubmitActionAt = Date.now();
+                requestActiveTabPostSubmitRefresh('manual-submit');
                 let rerenderAttempts = 0;
                 const tryRerender = () => {
                     rerenderAttempts++;

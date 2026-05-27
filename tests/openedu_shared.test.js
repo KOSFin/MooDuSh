@@ -36,6 +36,21 @@ test('deriveOptionAnswerText builds stable token for inline svg answers', () => 
     assert.equal(answerText, 'svg:hdiagram123 | Схема');
 });
 
+test('deriveOptionAnswerText unwraps simple TeX inline answers', () => {
+    assert.equal(openeduShared.deriveOptionAnswerText({ text: '\\(Y\\)' }), 'Y');
+    assert.equal(openeduShared.deriveOptionAnswerText({ text: '\\(\\Omega\\)' }), 'Ω');
+    assert.equal(openeduShared.deriveOptionAnswerText({ text: '\\(A(20,10,0)\\)' }), 'A(20,10,0)');
+});
+
+test('sanitizeQuestionPrompt unwraps TeX inline fragments', () => {
+    const prompt = openeduShared.sanitizeQuestionPrompt(
+        'Проекция точки, которая задана координатами \\(X\\) и \\(Y\\)',
+        []
+    );
+
+    assert.equal(prompt, 'Проекция точки, которая задана координатами X и Y');
+});
+
 test('matchesQuestionReference falls back to prompt and options when question key changes', () => {
     const candidate = {
         questionKey: 'new-key',
@@ -175,6 +190,54 @@ test('shouldRetainRenderedAnswers clears UI when page is truly empty for long en
     });
 
     assert.equal(keepUi, false);
+});
+
+test('shouldDelayAutoAdvanceForParsing waits for first iframe sync', () => {
+    const shouldWait = openeduShared.shouldDelayAutoAdvanceForParsing({
+        waitMs: 9000,
+        elapsedMs: 1800,
+        syncedAfterNavigation: false,
+        questionCount: 0,
+        answerEvidenceCount: 0
+    });
+
+    assert.equal(shouldWait, true);
+});
+
+test('shouldDelayAutoAdvanceForParsing waits for answer evidence on parsed questions', () => {
+    const shouldWait = openeduShared.shouldDelayAutoAdvanceForParsing({
+        waitMs: 9000,
+        elapsedMs: 3000,
+        syncedAfterNavigation: true,
+        questionCount: 2,
+        answerEvidenceCount: 1
+    });
+
+    assert.equal(shouldWait, true);
+});
+
+test('shouldDelayAutoAdvanceForParsing allows empty parsed sections', () => {
+    const shouldWait = openeduShared.shouldDelayAutoAdvanceForParsing({
+        waitMs: 9000,
+        elapsedMs: 3000,
+        syncedAfterNavigation: true,
+        questionCount: 0,
+        answerEvidenceCount: 0
+    });
+
+    assert.equal(shouldWait, false);
+});
+
+test('shouldDelayAutoAdvanceForParsing releases after timeout', () => {
+    const shouldWait = openeduShared.shouldDelayAutoAdvanceForParsing({
+        waitMs: 9000,
+        elapsedMs: 9500,
+        syncedAfterNavigation: true,
+        questionCount: 2,
+        answerEvidenceCount: 0
+    });
+
+    assert.equal(shouldWait, false);
 });
 
 test('parsePythonishDataLiteral reads OpenEdu advanced component payloads', () => {

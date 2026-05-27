@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const openeduAutoAdvanceEnabled = document.getElementById('openeduAutoAdvanceEnabled');
     const openeduRequiredCompletionOnly = document.getElementById('openeduRequiredCompletionOnly');
     const openeduActiveTabRefreshEnabled = document.getElementById('openeduActiveTabRefreshEnabled');
+    const openeduActiveTabPostSubmitRefreshEnabled = document.getElementById('openeduActiveTabPostSubmitRefreshEnabled');
     const openeduShowFallbackStats = document.getElementById('openeduShowFallbackStats');
     const openeduAutoUseSimilarAnswers = document.getElementById('openeduAutoUseSimilarAnswers');
     const openeduAutoUseFallbackAnswers = document.getElementById('openeduAutoUseFallbackAnswers');
@@ -309,6 +310,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         openeduAutoAdvanceEnabled.checked = settings.openedu.autoAdvanceEnabled;
         openeduRequiredCompletionOnly.checked = settings.openedu.requiredCompletionOnly;
         openeduActiveTabRefreshEnabled.checked = settings.openedu.activeTabRefreshEnabled;
+        openeduActiveTabPostSubmitRefreshEnabled.checked = settings.openedu.activeTabPostSubmitRefreshEnabled;
         openeduShowFallbackStats.checked = settings.openedu.showFallbackStats;
         openeduAutoUseSimilarAnswers.checked = settings.openedu.autoUseSimilarAnswers;
         openeduAutoUseFallbackAnswers.checked = settings.openedu.autoUseFallbackAnswers;
@@ -333,6 +335,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         nextState.openedu.autoAdvanceEnabled = openeduAutoAdvanceEnabled.checked;
         nextState.openedu.requiredCompletionOnly = openeduRequiredCompletionOnly.checked;
         nextState.openedu.activeTabRefreshEnabled = openeduActiveTabRefreshEnabled.checked;
+        nextState.openedu.activeTabPostSubmitRefreshEnabled = openeduActiveTabPostSubmitRefreshEnabled.checked;
         nextState.openedu.showFallbackStats = openeduShowFallbackStats.checked;
         nextState.openedu.autoUseSimilarAnswers = openeduAutoUseSimilarAnswers.checked;
         nextState.openedu.autoUseFallbackAnswers = openeduAutoUseFallbackAnswers.checked;
@@ -544,6 +547,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     bindAutoSave(openeduAutoAdvanceEnabled, 'change');
     bindAutoSave(openeduRequiredCompletionOnly, 'change');
     bindAutoSave(openeduActiveTabRefreshEnabled, 'change');
+    bindAutoSave(openeduActiveTabPostSubmitRefreshEnabled, 'change');
     bindAutoSave(openeduShowFallbackStats, 'change');
     bindAutoSave(openeduAutoUseSimilarAnswers, 'change');
     bindAutoSave(openeduAutoUseFallbackAnswers, 'change');

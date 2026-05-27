@@ -14,6 +14,112 @@
         return String(value || '').replace(/\s+/g, ' ').trim();
     }
 
+    const TEX_COMMANDS = {
+        Alpha: 'Α',
+        Beta: 'Β',
+        Gamma: 'Γ',
+        Delta: 'Δ',
+        Epsilon: 'Ε',
+        Zeta: 'Ζ',
+        Eta: 'Η',
+        Theta: 'Θ',
+        Iota: 'Ι',
+        Kappa: 'Κ',
+        Lambda: 'Λ',
+        Mu: 'Μ',
+        Nu: 'Ν',
+        Xi: 'Ξ',
+        Omicron: 'Ο',
+        Pi: 'Π',
+        Rho: 'Ρ',
+        Sigma: 'Σ',
+        Tau: 'Τ',
+        Upsilon: 'Υ',
+        Phi: 'Φ',
+        Chi: 'Χ',
+        Psi: 'Ψ',
+        Omega: 'Ω',
+        alpha: 'α',
+        beta: 'β',
+        gamma: 'γ',
+        delta: 'δ',
+        epsilon: 'ε',
+        varepsilon: 'ε',
+        zeta: 'ζ',
+        eta: 'η',
+        theta: 'θ',
+        vartheta: 'θ',
+        iota: 'ι',
+        kappa: 'κ',
+        lambda: 'λ',
+        mu: 'μ',
+        nu: 'ν',
+        xi: 'ξ',
+        omicron: 'ο',
+        pi: 'π',
+        rho: 'ρ',
+        sigma: 'σ',
+        tau: 'τ',
+        upsilon: 'υ',
+        phi: 'φ',
+        varphi: 'φ',
+        chi: 'χ',
+        psi: 'ψ',
+        omega: 'ω',
+        times: '×',
+        cdot: '·',
+        le: '≤',
+        leq: '≤',
+        ge: '≥',
+        geq: '≥',
+        neq: '≠',
+        ne: '≠',
+        pm: '±',
+        infty: '∞'
+    };
+
+    function stripTexDelimiters(value) {
+        let text = String(value || '');
+        for (let i = 0; i < 3; i += 1) {
+            const next = text
+                .replace(/\\\(([\s\S]*?)\\\)/g, '$1')
+                .replace(/\\\[([\s\S]*?)\\\]/g, '$1')
+                .replace(/\$\$([\s\S]*?)\$\$/g, '$1')
+                .replace(/(^|[^\w$])\$([^$\n]+)\$/g, '$1$2');
+            if (next === text) {
+                break;
+            }
+            text = next;
+        }
+        return text;
+    }
+
+    function unwrapTexCommandArguments(value) {
+        let text = String(value || '');
+        for (let i = 0; i < 4; i += 1) {
+            const next = text
+                .replace(/\\(?:text|mathrm|mathbf|mathit|mathsf|textrm)\s*\{([^{}]*)\}/g, '$1')
+                .replace(/\{([^{}]*)\}/g, '$1');
+            if (next === text) {
+                break;
+            }
+            text = next;
+        }
+        return text;
+    }
+
+    function normalizeTexMathText(value) {
+        let text = stripTexDelimiters(value);
+        text = unwrapTexCommandArguments(text);
+        text = text
+            .replace(/\\[,;:! ]/g, ' ')
+            .replace(/\\([A-Za-z]+)\b/g, (match, command) => TEX_COMMANDS[command] || command)
+            .replace(/\\([{}()[\],.;:+\-*/=])/g, '$1')
+            .replace(/\s+([)\],.;:])/g, '$1')
+            .replace(/([([])\s+/g, '$1');
+        return collapseWhitespace(text);
+    }
+
     function normalizeText(value) {
         return collapseWhitespace(value).toLowerCase();
     }
@@ -97,7 +203,7 @@
     }
 
     function sanitizeQuestionPrompt(value, answerTexts) {
-        const raw = collapseWhitespace(value);
+        const raw = normalizeTexMathText(value);
         if (!raw) {
             return '';
         }
@@ -128,7 +234,7 @@
     }
 
     function sanitizeAnswerText(value) {
-        return collapseWhitespace(stripQuestionUiPhrases(value))
+        return normalizeTexMathText(stripQuestionUiPhrases(value))
             .replace(/\s+([?.!,;:])/g, '$1');
     }
 
@@ -230,12 +336,12 @@
     }
 
     function deriveOptionAnswerText(payload) {
-        const text = collapseWhitespace(payload?.text || '');
+        const text = sanitizeAnswerText(payload?.text || '');
         if (text) {
             return text;
         }
 
-        const labelled = collapseWhitespace(payload?.ariaLabel || payload?.title || '');
+        const labelled = sanitizeAnswerText(payload?.ariaLabel || payload?.title || '');
         if (labelled) {
             return labelled;
         }
@@ -516,9 +622,34 @@
         return msSinceLastMeaningfulQuestions <= transientGraceMs || msSinceLastSubmit <= submitGraceMs;
     }
 
+    function shouldDelayAutoAdvanceForParsing(state) {
+        const waitMs = Math.max(0, Number(state?.waitMs || 0));
+        if (waitMs === 0) {
+            return false;
+        }
+
+        const elapsedMs = Math.max(0, Number(state?.elapsedMs || 0));
+        if (elapsedMs >= waitMs) {
+            return false;
+        }
+
+        if (!state?.syncedAfterNavigation) {
+            return true;
+        }
+
+        const questionCount = Math.max(0, Number(state?.questionCount || 0));
+        if (questionCount === 0) {
+            return false;
+        }
+
+        const answerEvidenceCount = Math.max(0, Number(state?.answerEvidenceCount || 0));
+        return answerEvidenceCount < questionCount;
+    }
+
     const api = {
         collapseWhitespace,
         normalizeText,
+        normalizeTexMathText,
         normalizeFingerprintText,
         sanitizeQuestionPrompt,
         sanitizeAnswerText,
@@ -528,6 +659,7 @@
         buildStableQuestionKeyBase,
         matchesQuestionReference,
         shouldRetainRenderedAnswers,
+        shouldDelayAutoAdvanceForParsing,
         parsePythonishDataLiteral,
         normalizeMatchingText,
         buildMatchingTablePairs
