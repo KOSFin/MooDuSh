@@ -2792,18 +2792,57 @@ class Database:
                 orphan_questions.append(item)
 
         vertical_items = [dict(r) for r in verticals]
+        known_vertical_ids = {str(item.get('vertical_id') or '') for item in vertical_items}
+        for vertical_id, question_items in questions_by_vertical.items():
+            if not vertical_id or vertical_id in known_vertical_ids:
+                continue
+            first_question = question_items[0] if question_items else {}
+            vertical_items.append({
+                'chapter_id': str(first_question.get('chapter_id') or ''),
+                'sequential_id': str(first_question.get('sequential_id') or ''),
+                'vertical_id': vertical_id,
+                'title': '',
+                'question_count': len(question_items),
+                'test_count': len({str(q.get('test_key') or '') for q in question_items if q.get('test_key')}),
+            })
+
         verticals_by_seq: dict[str, list[dict[str, Any]]] = {}
         for item in vertical_items:
             item['questions'] = questions_by_vertical.get(str(item.get('vertical_id') or ''), [])
             verticals_by_seq.setdefault(item.get('sequential_id') or '', []).append(item)
 
         sequential_items = [dict(r) for r in sequentials]
+        known_sequential_ids = {str(item.get('sequential_id') or '') for item in sequential_items}
+        for sequential_id, seq_verticals in verticals_by_seq.items():
+            if sequential_id in known_sequential_ids:
+                continue
+            first_vertical = seq_verticals[0] if seq_verticals else {}
+            sequential_items.append({
+                'chapter_id': str(first_vertical.get('chapter_id') or ''),
+                'sequential_id': sequential_id,
+                'title': 'Без sequence' if not sequential_id else sequential_id,
+                'vertical_count': len(seq_verticals),
+                'question_count': sum(int(v.get('question_count') or 0) for v in seq_verticals),
+            })
+
         sequentials_by_chapter: dict[str, list[dict[str, Any]]] = {}
         for item in sequential_items:
             item['verticals'] = verticals_by_seq.get(item.get('sequential_id') or '', [])
             sequentials_by_chapter.setdefault(item.get('chapter_id') or '', []).append(item)
 
         chapter_items = [dict(r) for r in chapters]
+        known_chapter_ids = {str(item.get('chapter_id') or '') for item in chapter_items}
+        for chapter_id, chapter_sequentials in sequentials_by_chapter.items():
+            if chapter_id in known_chapter_ids:
+                continue
+            chapter_items.append({
+                'chapter_id': chapter_id,
+                'title': 'Без раздела' if not chapter_id else chapter_id,
+                'sequential_count': len(chapter_sequentials),
+                'vertical_count': sum(int(seq.get('vertical_count') or 0) for seq in chapter_sequentials),
+                'question_count': sum(int(seq.get('question_count') or 0) for seq in chapter_sequentials),
+            })
+
         for item in chapter_items:
             item['sequentials'] = sequentials_by_chapter.get(item.get('chapter_id') or '', [])
 

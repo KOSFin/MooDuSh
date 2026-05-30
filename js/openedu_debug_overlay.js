@@ -59,15 +59,7 @@
     }
 
     function labelFor(rootNode, text) {
-        const doc = rootNode.ownerDocument || document;
-        const label = doc.createElement('div');
-        const rect = rootNode.getBoundingClientRect();
-        label.className = 'moodush-openedu-debug-label';
-        label.setAttribute('data-moodush-extension', 'openedu-debug-overlay');
-        label.textContent = text;
-        label.style.left = Math.max(4, rect.left) + 'px';
-        label.style.top = Math.max(4, rect.top - 18) + 'px';
-        doc.body.appendChild(label);
+        rootNode.setAttribute('title', text);
     }
 
     function questionStateText(question) {

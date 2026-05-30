@@ -6828,7 +6828,7 @@
     }
 
     async function runStickCycle(force, options) {
-        const allowNetwork = options?.allowNetwork !== false;
+        let allowNetwork = options?.allowNetwork !== false;
         const source = String(options?.source || 'generic');
 
         if (cyclesStopped) {

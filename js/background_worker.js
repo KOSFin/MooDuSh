@@ -164,18 +164,11 @@ async function ensurePrivacyPolicyTab() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-    seedOldPrivacySettings()
-        .then((accepted) => {
-            if (!accepted) {
-                return ensurePrivacyPolicyTab();
-            }
-            return null;
-        })
-        .catch(() => {});
+    seedOldPrivacySettings().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
-    ensurePrivacyPolicyTab().catch(() => {});
+    seedOldPrivacySettings().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
