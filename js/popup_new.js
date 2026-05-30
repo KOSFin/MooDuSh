@@ -5,33 +5,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const buildConfig = window.ParamExtBuildConfig || {};
     const manifest = chrome.runtime.getManifest();
+    const settingsApi = window.ParamExtSettings;
+    const $ = (id) => document.getElementById(id);
 
     if (window.ParamExtTelemetry) {
         window.ParamExtTelemetry.installGlobalHandlers('popup');
     }
 
-    const $ = (id) => document.getElementById(id);
-    const settingsApi = window.ParamExtSettings;
-
     const refs = {
         mainLogo: $('mainLogo'),
         headerStatus: $('headerStatus'),
         versionPill: $('versionPill'),
-        onboardingPanel: $('onboardingPanel'),
-        privacyStep: $('privacyStep'),
-        apiSetupStep: $('apiSetupStep'),
-        acceptPrivacyBtn: $('acceptPrivacyBtn'),
-        allowTechnicalDataCollection: $('allowTechnicalDataCollection'),
+        openSetupBtn: $('openSetupBtn'),
+        privacyScreen: $('privacyScreen'),
+        openPrivacyBtn: $('openPrivacyBtn'),
+        refreshPrivacyBtn: $('refreshPrivacyBtn'),
+        setupScreen: $('setupScreen'),
+        setupBackBtn: $('setupBackBtn'),
+        setupContinueBtn: $('setupContinueBtn'),
+        appScreen: $('appScreen'),
         botLink: $('botLink'),
         customBackendToggle: $('customBackendToggle'),
         customBackendFields: $('customBackendFields'),
         backendApiBaseUrl: $('backendApiBaseUrl'),
         backendApiToken: $('backendApiToken'),
         backendRequestTimeoutMs: $('backendRequestTimeoutMs'),
+        openeduBackendVersion: $('openeduBackendVersion'),
         backendPingBtn: $('backendPingBtn'),
         backendResetUrlBtn: $('backendResetUrlBtn'),
         backendPingStatus: $('backendPingStatus'),
         backendCompactStatus: $('backendCompactStatus'),
+        backendVersionStatus: $('backendVersionStatus'),
         platformMoodle: $('platformMoodle'),
         platformOpenedu: $('platformOpenedu'),
         moodleSettings: $('moodleSettings'),
@@ -71,17 +75,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     let settings = await settingsApi.getSettings();
-    let autoSaveTimer = 0;
+    let setupOpenedFromApp = false;
+    let saveTimer = 0;
 
     refs.versionPill.textContent = 'v' + (manifest.version || 'unknown');
     refs.buildStatus.textContent = String(buildConfig.buildChannel || 'local') + ' / ' + String(buildConfig.buildId || 'local-dev').slice(0, 8);
-    if (refs.mainLogo) {
-        refs.mainLogo.addEventListener('error', () => {
-            refs.mainLogo.src = '../../logo_main.png';
-        });
+    refs.botLink.href = buildConfig.botLink || 'https://t.me/moodush_bot';
+    refs.mainLogo?.addEventListener('error', () => {
+        refs.mainLogo.src = '../../logo_main.png';
+    });
+
+    function defaultOpeneduUrl() {
+        return buildConfig.openeduApiBaseUrl || settingsApi.DEFAULT_SETTINGS.backend.openedu.apiBaseUrl;
     }
-    if (refs.botLink) {
-        refs.botLink.href = buildConfig.botLink || 'https://t.me/moodush_bot';
+
+    function endpointPrefix() {
+        return (refs.openeduBackendVersion.value || settings.openedu.backendVersion || 'v2') === 'v1' ? '/v1' : '/v2';
     }
 
     function setRadio(name, value) {
@@ -95,26 +104,37 @@ document.addEventListener('DOMContentLoaded', async () => {
         return checked ? checked.value : fallback;
     }
 
-    function defaultOpeneduUrl() {
-        return buildConfig.openeduApiBaseUrl || settingsApi.DEFAULT_SETTINGS.backend.openedu.apiBaseUrl;
-    }
-
     function sendToActiveTab(message) {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             const tabId = tabs && tabs[0] ? tabs[0].id : null;
             if (!tabId) {
                 return;
             }
-            chrome.tabs.sendMessage(tabId, message, () => {
-                const lastError = chrome.runtime.lastError;
-                if (lastError && window.ParamExtTelemetry) {
-                    window.ParamExtTelemetry.push('send_message_error', {
-                        message: lastError.message,
-                        type: message.type || 'unknown'
-                    }, 'popup');
-                }
-            });
+            chrome.tabs.sendMessage(tabId, message, () => {});
         });
+    }
+
+    function showScreen(name) {
+        refs.privacyScreen.classList.toggle('hidden', name !== 'privacy');
+        refs.setupScreen.classList.toggle('hidden', name !== 'setup');
+        refs.appScreen.classList.toggle('hidden', name !== 'app');
+        refs.openSetupBtn.classList.toggle('hidden', name !== 'app');
+        refs.setupBackBtn.classList.toggle('hidden', !setupOpenedFromApp);
+        refs.headerStatus.textContent = name === 'privacy'
+            ? 'Нужно согласие'
+            : (name === 'setup' ? 'Нужно подключение' : 'Готово к работе');
+    }
+
+    function route() {
+        const accepted = Boolean(settings.onboarding?.privacyAccepted);
+        const hasToken = Boolean(settings.backend?.openedu?.apiToken);
+        if (!accepted) {
+            showScreen('privacy');
+        } else if (!hasToken || setupOpenedFromApp) {
+            showScreen('setup');
+        } else {
+            showScreen('app');
+        }
     }
 
     function setTab(name) {
@@ -125,15 +145,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         refs.moodleSettings.classList.toggle('hidden', name !== 'moodle');
         refs.statsPanel.classList.toggle('hidden', name !== 'stats');
         refs.diagnosticsPanel.classList.toggle('hidden', name !== 'diagnostics');
-    }
-
-    function updateOnboarding() {
-        const accepted = Boolean(settings.onboarding?.privacyAccepted);
-        const hasToken = Boolean(settings.backend?.openedu?.apiToken);
-        refs.onboardingPanel.classList.toggle('hidden', accepted && hasToken);
-        refs.privacyStep.classList.toggle('hidden', accepted);
-        refs.apiSetupStep.classList.toggle('hidden', !accepted || hasToken);
-        refs.headerStatus.textContent = hasToken ? 'Готово к работе' : 'Нужно подключение';
     }
 
     function updateModeVisibility() {
@@ -153,6 +164,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         refs.backendApiBaseUrl.value = openeduBackend.apiBaseUrl || defaultOpeneduUrl();
         refs.backendApiToken.value = openeduBackend.apiToken || '';
         refs.backendRequestTimeoutMs.value = String(openeduBackend.requestTimeoutMs || 4000);
+        refs.openeduBackendVersion.value = settings.openedu.backendVersion || 'v2';
+        refs.backendVersionStatus.textContent = String(refs.openeduBackendVersion.value || 'v2').toUpperCase();
         refs.customBackendToggle.checked = Boolean(openeduBackend.apiBaseUrl && openeduBackend.apiBaseUrl !== defaultOpeneduUrl());
         refs.customBackendFields.classList.toggle('hidden', !refs.customBackendToggle.checked);
 
@@ -172,20 +185,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         refs.openeduMissingAnswerAction.value = settings.openedu.missingAnswerAction;
         refs.openeduAutoAdvanceDelayMs.value = String(settings.openedu.autoAdvanceDelayMs);
         refs.openeduDebugOverlay.checked = Boolean(settings.diagnostics?.openeduDebugOverlay);
-        refs.allowTechnicalDataCollection.checked = settings.onboarding?.allowTechnicalDataCollection !== false;
         refs.platformOpenedu.classList.toggle('active', settings.activePlatform === 'openedu');
         refs.platformMoodle.classList.toggle('active', settings.activePlatform === 'moodle');
         refs.platformOpenedu.textContent = settings.activePlatform === 'openedu' ? 'Активно' : 'Сделать активным';
         refs.platformMoodle.textContent = settings.activePlatform === 'moodle' ? 'Активно' : 'Сделать активным';
-        updateOnboarding();
         updateModeVisibility();
+        route();
     }
 
     function collectStateFromUi() {
         const next = JSON.parse(JSON.stringify(settings));
         next.activePlatform = refs.platformMoodle.classList.contains('active') ? 'moodle' : 'openedu';
         next.onboarding.privacyAccepted = Boolean(next.onboarding.privacyAccepted);
-        next.onboarding.allowTechnicalDataCollection = refs.allowTechnicalDataCollection.checked;
         next.onboarding.completed = Boolean(next.onboarding.privacyAccepted && refs.backendApiToken.value.trim());
 
         next.backend.openedu.apiBaseUrl = refs.customBackendToggle.checked
@@ -193,6 +204,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             : defaultOpeneduUrl();
         next.backend.openedu.apiToken = refs.backendApiToken.value.trim();
         next.backend.openedu.requestTimeoutMs = Math.max(1000, Number(refs.backendRequestTimeoutMs.value || 4000));
+        next.openedu.backendVersion = refs.openeduBackendVersion.value === 'v1' ? 'v1' : 'v2';
 
         next.moodle.mode = radioValue('moodleMode', next.moodle.mode);
         next.moodle.wandHotkey = refs.wandKey.value.trim() || next.moodle.wandHotkey;
@@ -215,20 +227,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         return settingsApi.normalizeSettings(next);
     }
 
-    async function save(reason) {
+    async function save(reason, stayOnSetup) {
         settings = collectStateFromUi();
         settings = await settingsApi.saveSettings(settings);
         sendToActiveTab({ type: 'SETTINGS_UPDATED', settings, reason: reason || 'popup' });
+        if (!stayOnSetup) {
+            setupOpenedFromApp = false;
+        }
         applyStateToUi();
     }
 
-    function scheduleSave(reason) {
-        if (autoSaveTimer) {
-            clearTimeout(autoSaveTimer);
+    function scheduleAppSave(reason) {
+        if (saveTimer) {
+            clearTimeout(saveTimer);
         }
-        autoSaveTimer = setTimeout(() => {
-            autoSaveTimer = 0;
-            save(reason);
+        saveTimer = setTimeout(() => {
+            saveTimer = 0;
+            save(reason, false);
         }, 250);
     }
 
@@ -245,14 +260,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         setBackendStatus('Проверка...', null);
         const baseUrl = (refs.customBackendToggle.checked ? refs.backendApiBaseUrl.value : defaultOpeneduUrl()).trim().replace(/\/$/, '');
         const token = refs.backendApiToken.value.trim();
+        if (!baseUrl) {
+            setBackendStatus('URL пустой', false);
+            return false;
+        }
         try {
             const response = await fetch(baseUrl + '/v2/status', {
                 headers: token ? { Authorization: 'Bearer ' + token } : {},
                 cache: 'no-store'
             });
-            setBackendStatus(response.ok || response.status !== 404 ? 'Онлайн' : 'Не найден', response.ok || response.status !== 404);
+            const ok = response.ok || response.status === 401 || response.status === 403;
+            setBackendStatus(ok ? 'Онлайн' : 'Ошибка ' + response.status, ok);
+            return ok;
         } catch (_) {
             setBackendStatus('Оффлайн', false);
+            return false;
         }
     }
 
@@ -260,6 +282,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const baseUrl = settings.backend.openedu.apiBaseUrl;
         const token = settings.backend.openedu.apiToken;
         if (!baseUrl || !token) {
+            refs.statQuestions.textContent = '!';
+            return;
+        }
+        if ((settings.openedu.backendVersion || 'v2') !== 'v2') {
+            refs.statQuestions.textContent = 'V1';
             return;
         }
         try {
@@ -309,62 +336,75 @@ document.addEventListener('DOMContentLoaded', async () => {
             event.preventDefault();
             if ((event.key === 'Backspace' || event.key === 'Delete') && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
                 input.value = '';
-                scheduleSave('hotkey-clear');
+                scheduleAppSave('hotkey-clear');
                 return;
             }
             const value = settingsApi.serializeHotkey(event);
             if (value) {
                 input.value = value;
-                scheduleSave('hotkey');
+                scheduleAppSave('hotkey');
             }
         });
     }
 
-    document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => setTab(tab.dataset.tab)));
-    refs.acceptPrivacyBtn.addEventListener('click', () => {
-        settings.onboarding.privacyAccepted = true;
-        settings.onboarding.allowTechnicalDataCollection = refs.allowTechnicalDataCollection.checked;
-        scheduleSave('privacy');
+    refs.openPrivacyBtn.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'PARAMEXT_OPEN_PRIVACY_POLICY' }, () => {});
+    });
+    refs.refreshPrivacyBtn.addEventListener('click', async () => {
+        settings = await settingsApi.getSettings();
         applyStateToUi();
     });
+    refs.openSetupBtn.addEventListener('click', () => {
+        setupOpenedFromApp = true;
+        applyStateToUi();
+    });
+    refs.setupBackBtn.addEventListener('click', () => {
+        setupOpenedFromApp = false;
+        applyStateToUi();
+    });
+    refs.setupContinueBtn.addEventListener('click', async () => {
+        await save('setup-continue', false);
+    });
+
+    document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => setTab(tab.dataset.tab)));
     refs.customBackendToggle.addEventListener('change', () => {
         refs.customBackendFields.classList.toggle('hidden', !refs.customBackendToggle.checked);
-        scheduleSave('backend-custom-toggle');
+    });
+    refs.openeduBackendVersion.addEventListener('change', () => {
+        refs.backendVersionStatus.textContent = String(refs.openeduBackendVersion.value || 'v2').toUpperCase();
     });
     refs.backendPingBtn.addEventListener('click', pingBackend);
     refs.backendResetUrlBtn.addEventListener('click', () => {
         refs.customBackendToggle.checked = false;
         refs.backendApiBaseUrl.value = defaultOpeneduUrl();
         refs.customBackendFields.classList.add('hidden');
-        scheduleSave('backend-reset');
+        setBackendStatus('URL сброшен', null);
     });
     refs.platformOpenedu.addEventListener('click', () => {
         settings.activePlatform = 'openedu';
-        scheduleSave('platform-openedu');
+        scheduleAppSave('platform-openedu');
         applyStateToUi();
     });
     refs.platformMoodle.addEventListener('click', () => {
         settings.activePlatform = 'moodle';
-        scheduleSave('platform-moodle');
+        scheduleAppSave('platform-moodle');
         applyStateToUi();
     });
-    refs.btnSave.addEventListener('click', () => save('save-button'));
+    refs.btnSave.addEventListener('click', () => save('save-button', false));
     refs.statsRefreshBtn.addEventListener('click', refreshStats);
     refs.updateCheckBtn.addEventListener('click', checkUpdate);
     refs.btnStart.addEventListener('click', async () => {
         settings.moodle.autoSolving = true;
-        await save('moodle-start');
+        await save('moodle-start', false);
         sendToActiveTab({ type: 'START_AUTO_SOLVE' });
     });
     refs.btnStop.addEventListener('click', async () => {
         settings.moodle.autoSolving = false;
-        await save('moodle-stop');
+        await save('moodle-stop', false);
         sendToActiveTab({ type: 'STOP_AUTO_SOLVE' });
     });
 
     [
-        refs.backendApiBaseUrl,
-        refs.backendApiToken,
         refs.nextBtnSelector,
         refs.openeduAutoAdvanceDelayMs,
         refs.openeduAutoAdvanceEnabled,
@@ -376,26 +416,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         refs.openeduAutoUseFallbackAnswers,
         refs.openeduAutoCheckAnswers,
         refs.openeduMissingAnswerAction,
-        refs.openeduDebugOverlay,
-        refs.allowTechnicalDataCollection
+        refs.openeduDebugOverlay
     ].forEach((control) => {
         control.addEventListener(control.tagName === 'INPUT' && control.type !== 'checkbox' ? 'input' : 'change', () => {
             updateModeVisibility();
-            scheduleSave(control.id || 'change');
+            scheduleAppSave(control.id || 'change');
         });
     });
     Array.from(document.getElementsByName('openeduMode')).forEach((radio) => radio.addEventListener('change', () => {
         updateModeVisibility();
-        scheduleSave('openedu-mode');
+        scheduleAppSave('openedu-mode');
     }));
     Array.from(document.getElementsByName('moodleMode')).forEach((radio) => radio.addEventListener('change', () => {
         updateModeVisibility();
-        scheduleSave('moodle-mode');
+        scheduleAppSave('moodle-mode');
     }));
     bindHotkey(refs.wandKey);
     bindHotkey(refs.openeduHotkey);
 
     applyStateToUi();
+    pingBackend();
     checkUpdate();
     refreshStats();
 });

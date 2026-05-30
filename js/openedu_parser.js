@@ -128,6 +128,12 @@
 
     function getQuestionType(inputs) {
         const types = new Set(inputs.map((input) => input.type || input.tagName.toLowerCase()));
+        if (types.has('drag-order')) {
+            return 'drag_order';
+        }
+        if (types.has('drag-table')) {
+            return 'drag_table';
+        }
         if (types.has('checkbox')) {
             return 'multiple_choice';
         }
@@ -141,6 +147,76 @@
             return 'select';
         }
         return 'unknown';
+    }
+
+    function buildDragQuestions(doc, options) {
+        const questions = [];
+        const roots = Array.from(doc.querySelectorAll('.problem, .xblock-student_view-problem, [data-problem-id]'))
+            .filter((root) => {
+                if (!root.querySelector('table.drag-table, table.answerPlaceStudent') || !root.querySelector('.dragAnswer[id]')) {
+                    return false;
+                }
+                const nestedProblem = root.querySelector('.problem');
+                return !(nestedProblem && nestedProblem !== root && nestedProblem.querySelector('table.drag-table, table.answerPlaceStudent'));
+            });
+
+        roots.forEach((root, index) => {
+            const table = root.querySelector('table.drag-table, table.answerPlaceStudent');
+            const cells = Array.from(table?.querySelectorAll('td.cell[id], th.cell[id]') || []);
+            const answers = Array.from(root.querySelectorAll('.dragAnswer[id]'));
+            if (!cells.length || !answers.length) {
+                return;
+            }
+
+            const answerItems = answers.map((answer, answerIndex) => {
+                const answerText = sanitizeAnswer(textOf(answer));
+                return {
+                    answerKey: answer.getAttribute('id') || ('drag_' + answerIndex),
+                    answerText,
+                    inputType: cells.length === 1 ? 'drag-order' : 'drag-table',
+                    selected: Boolean(cells.some((cell) => cell.contains(answer))),
+                    correct: false,
+                    incorrect: false,
+                    answerFingerprint: hashText(answerText || answer.getAttribute('id') || '')
+                };
+            }).filter((item) => item.answerText);
+
+            if (!answerItems.length) {
+                return;
+            }
+
+            const answerTexts = answerItems.map((item) => item.answerText);
+            const prompt = extractDragPrompt(root, answerTexts) || extractPrompt(root, answerTexts);
+            const questionType = cells.length === 1 ? 'drag_order' : 'drag_table';
+            const questionFingerprint = fingerprintQuestion(prompt, answerItems.map((item) => item.answerText));
+            const question = {
+                questionKey: 'qv2_' + questionFingerprint,
+                prompt,
+                questionType,
+                questionFingerprint,
+                parserSource: 'openedu_parser_dom',
+                parseConfidence: 0,
+                rawType: root.className || root.tagName.toLowerCase(),
+                problemId: root.getAttribute('data-problem-id') || root.id || '',
+                answers: answerItems,
+                sourceFrame: options?.sourceUrl || doc.__PARAMEXT_SOURCE_PATH || '',
+                root
+            };
+            question.parseConfidence = confidenceFor(question);
+            questions.push(question);
+        });
+
+        return questions;
+    }
+
+    function extractDragPrompt(root, answerTexts) {
+        const container = root.closest?.('.xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert') || root;
+        const header = container.querySelector?.('.problem-header, .problem-title, .question-title, h2, h3, h4, legend');
+        const headerText = cleanPromptText(textOf(header));
+        if (headerText && !SYSTEM_TEXT_RE.test(headerText)) {
+            return sanitizePrompt(headerText, answerTexts);
+        }
+        return sanitizePrompt(nearbyPrompt(root), answerTexts);
     }
 
     function parseEmbeddedDocuments(doc) {
@@ -240,9 +316,15 @@
     function parseDocument(doc, options) {
         const roots = getQuestionBlocks(doc);
         const seen = new Set();
-        const questions = [];
+        const questions = buildDragQuestions(doc, options);
+        questions.forEach((question) => {
+            seen.add(question.questionFingerprint || question.questionKey);
+        });
 
         roots.forEach((block, index) => {
+            if (block.querySelector('table.drag-table, table.answerPlaceStudent') && block.querySelector('.dragAnswer[id]')) {
+                return;
+            }
             const inputs = Array.from(block.querySelectorAll(INPUT_SELECTOR))
                 .filter((input) => !input.disabled && input.type !== 'hidden');
             const hiddenTextInputs = Array.from(block.querySelectorAll('textarea.answer[hidden], textarea[name="answer"][hidden]'));

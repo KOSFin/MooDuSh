@@ -3,17 +3,17 @@
 }
 
 body {
-    width: 390px;
-    min-height: 520px;
+    width: 410px;
+    min-height: 560px;
     margin: 0;
-    background: #f6f7f9;
-    color: #141922;
+    background: #eef1f5;
+    color: #151922;
     font-family: Inter, "Segoe UI", Arial, sans-serif;
 }
 
 .popup-shell {
     display: grid;
-    gap: 10px;
+    gap: 12px;
     padding: 12px;
 }
 
@@ -22,12 +22,15 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    min-height: 52px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #d8dde6;
+    min-height: 54px;
+    padding: 8px 10px;
+    border: 1px solid #d9dee7;
+    border-radius: 8px;
+    background: #fff;
 }
 
-.brand {
+.brand,
+.header-actions {
     display: flex;
     align-items: center;
     gap: 9px;
@@ -50,19 +53,80 @@ body {
 
 .popup-header p {
     margin: 2px 0 0;
-    color: #697386;
+    color: #667085;
     font-size: 11px;
+}
+
+.icon-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid #d0d6e0;
+    border-radius: 8px;
+    background: #fff;
+    color: #344054;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
 }
 
 .version-pill {
     flex: 0 0 auto;
     border: 1px solid #ccd3df;
     border-radius: 999px;
-    padding: 3px 7px;
-    background: #fff;
+    padding: 4px 8px;
+    background: #f8fafc;
     color: #4b5565;
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 800;
+}
+
+.screen,
+.app-screen {
+    display: grid;
+    gap: 12px;
+}
+
+.screen {
+    min-height: 460px;
+    align-content: start;
+    border: 1px solid #d9dee7;
+    border-radius: 8px;
+    background: #fff;
+    padding: 18px;
+}
+
+.screen-copy {
+    display: grid;
+    gap: 7px;
+    padding: 8px 0 2px;
+}
+
+.screen-kicker {
+    color: #2563eb;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.screen h2 {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.18;
+    font-weight: 850;
+    letter-spacing: 0;
+}
+
+.screen p {
+    margin: 0;
+    color: #566071;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.screen-actions {
+    display: grid;
+    gap: 8px;
+    margin-top: auto;
 }
 
 .panel {
@@ -85,14 +149,7 @@ body {
     margin: 0;
     font-size: 13px;
     line-height: 1.2;
-    font-weight: 800;
-}
-
-.panel p {
-    margin: 6px 0 9px;
-    color: #566071;
-    font-size: 12px;
-    line-height: 1.45;
+    font-weight: 850;
 }
 
 .tabs {
@@ -103,7 +160,7 @@ body {
 
 .tab,
 .platform-btn {
-    min-height: 30px;
+    min-height: 32px;
     border: 1px solid #d0d6e0;
     border-radius: 8px;
     background: #fff;
@@ -140,7 +197,7 @@ body {
 .segmented span {
     display: grid;
     place-items: center;
-    min-height: 34px;
+    min-height: 36px;
     border: 1px solid #d0d6e0;
     border-radius: 8px;
     padding: 5px;
@@ -161,7 +218,7 @@ body {
 
 .field {
     display: grid;
-    gap: 4px;
+    gap: 5px;
     margin: 8px 0;
 }
 
@@ -170,7 +227,7 @@ body {
     color: #344054;
     font-size: 12px;
     line-height: 1.35;
-    font-weight: 650;
+    font-weight: 700;
 }
 
 .field input,
@@ -178,10 +235,10 @@ body {
 #backendApiToken,
 #backendApiBaseUrl {
     width: 100%;
-    min-height: 32px;
+    min-height: 36px;
     border: 1px solid #cfd6e2;
     border-radius: 8px;
-    padding: 6px 8px;
+    padding: 7px 9px;
     background: #fff;
     color: #141922;
     font-size: 12px;
@@ -196,7 +253,7 @@ body {
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    margin: 7px 0;
+    margin: 8px 0;
 }
 
 .check-row input {
@@ -213,7 +270,8 @@ body {
     margin-top: 8px;
 }
 
-.action-row {
+.action-row,
+.backend-check {
     display: flex;
     align-items: center;
     gap: 7px;
@@ -222,17 +280,17 @@ body {
 
 .bot-link {
     display: inline-flex;
-    margin: 2px 0 8px;
+    width: max-content;
     color: #0f766e;
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 850;
     text-decoration: none;
 }
 
 .status-text {
     color: #697386;
     font-size: 11px;
-    font-weight: 800;
+    font-weight: 850;
 }
 
 .status-text.online,
@@ -266,20 +324,21 @@ body {
     display: block;
     color: #667085;
     font-size: 10px;
-    font-weight: 800;
+    font-weight: 850;
 }
 
 .stats-grid strong,
 .diagnostics-list strong {
     display: block;
-    margin-top: 3px;
+    margin-top: 4px;
     color: #111827;
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1;
 }
 
 .diagnostics-list {
     display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 7px;
     margin-top: 9px;
 }

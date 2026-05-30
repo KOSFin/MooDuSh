@@ -17,150 +17,167 @@
                     <p id="headerStatus">OpenEdu и Moodle</p>
                 </div>
             </div>
-            <div class="version-pill" id="versionPill">v...</div>
+            <div class="header-actions">
+                <button type="button" id="openSetupBtn" class="icon-btn" title="Подключение и backend">⚙</button>
+                <div class="version-pill" id="versionPill">v...</div>
+            </div>
         </header>
 
-        <section id="onboardingPanel" class="panel">
-            <div id="privacyStep" class="onboarding-step">
-                <h2>Перед началом</h2>
-                <p>Расширение обрабатывает технические данные страницы теста, чтобы находить вопросы, ответы и синхронизировать статистику с backend.</p>
-                <label class="check-row">
-                    <input type="checkbox" id="allowTechnicalDataCollection" checked>
-                    <span>Разрешить отправку технических логов ошибок</span>
-                </label>
-                <div class="action-row">
-                    <a href="../privacy_policy/index.html" target="_blank" class="btn btn-sm btn-outline-secondary">Политика</a>
-                    <button type="button" id="acceptPrivacyBtn" class="btn btn-sm btn-dark">Согласиться</button>
-                </div>
+        <section id="privacyScreen" class="screen">
+            <div class="screen-copy">
+                <span class="screen-kicker">Первый запуск</span>
+                <h2>Нужно принять политику данных</h2>
+                <p>Согласие открывается на отдельной странице расширения. После принятия вернитесь сюда и продолжите настройку.</p>
             </div>
+            <div class="screen-actions">
+                <button type="button" id="openPrivacyBtn" class="btn btn-dark w-100">Открыть политику</button>
+                <button type="button" id="refreshPrivacyBtn" class="btn btn-outline-dark w-100">Я уже принял</button>
+            </div>
+        </section>
 
-            <div id="apiSetupStep" class="onboarding-step hidden">
-                <h2>Подключение</h2>
-                <p>Получите ключ в Telegram-боте и вставьте его ниже. Ключ хранится только в chrome.storage этого браузера.</p>
-                <a id="botLink" href="#" target="_blank" class="bot-link">Открыть Telegram-бота</a>
+        <section id="setupScreen" class="screen hidden">
+            <div class="screen-copy">
+                <span class="screen-kicker">Подключение</span>
+                <h2>Войдите через Telegram-ключ</h2>
+                <p>Откройте бота, получите персональный ключ и вставьте его ниже. Изменения применяются только по кнопке продолжения.</p>
+            </div>
+            <a id="botLink" href="#" target="_blank" class="bot-link">Открыть Telegram-бота</a>
+            <label class="field">
+                <span>Персональный ключ</span>
+                <input type="password" id="backendApiToken" placeholder="Вставьте ключ">
+            </label>
+            <label class="field">
+                <span>Версия OpenEdu backend</span>
+                <select id="openeduBackendVersion">
+                    <option value="v2">V2: новая база и parser reports</option>
+                    <option value="v1">V1: legacy-режим</option>
+                </select>
+            </label>
+            <label class="check-row">
+                <input type="checkbox" id="customBackendToggle">
+                <span>Использовать свой backend</span>
+            </label>
+            <div id="customBackendFields" class="hidden">
                 <label class="field">
-                    <span>Персональный ключ</span>
-                    <input type="password" id="backendApiToken" placeholder="Bearer token">
+                    <span>OpenEdu API URL</span>
+                    <input type="text" id="backendApiBaseUrl" placeholder="https://api.example.com">
                 </label>
-                <label class="check-row">
-                    <input type="checkbox" id="customBackendToggle">
-                    <span>Использовать свой backend</span>
-                </label>
-                <div id="customBackendFields" class="hidden">
+            </div>
+            <input type="number" id="backendRequestTimeoutMs" class="hidden" min="1000" step="250">
+            <div class="backend-check">
+                <button type="button" id="backendPingBtn" class="btn btn-outline-dark">Проверить backend</button>
+                <button type="button" id="backendResetUrlBtn" class="btn btn-outline-secondary">Сбросить URL</button>
+                <span id="backendPingStatus" class="status-text">Не проверено</span>
+            </div>
+            <div class="screen-actions">
+                <button type="button" id="setupBackBtn" class="btn btn-outline-secondary w-100 hidden">Назад</button>
+                <button type="button" id="setupContinueBtn" class="btn btn-dark w-100">Продолжить</button>
+            </div>
+        </section>
+
+        <section id="appScreen" class="app-screen hidden">
+            <nav class="tabs" aria-label="Разделы расширения">
+                <button type="button" class="tab active" data-tab="openedu">OpenEdu</button>
+                <button type="button" class="tab" data-tab="moodle">Moodle</button>
+                <button type="button" class="tab" data-tab="stats">Stats</button>
+                <button type="button" class="tab" data-tab="diagnostics">Diagnostics</button>
+            </nav>
+
+            <section id="openeduSettings" class="panel tab-panel">
+                <div class="panel-head">
+                    <h2>OpenEdu</h2>
+                    <button type="button" id="platformOpenedu" class="platform-btn active">Активно</button>
+                </div>
+                <div class="segmented" role="radiogroup" aria-label="Режим OpenEdu">
+                    <label><input type="radio" name="openeduMode" value="stick"><span>Палочка</span></label>
+                    <label><input type="radio" name="openeduMode" value="assist"><span>Авто-вставка</span></label>
+                    <label><input type="radio" name="openeduMode" value="autoSolve"><span>Авто-прохождение</span></label>
+                </div>
+                <div id="openeduStickOptions" class="option-block">
                     <label class="field">
-                        <span>OpenEdu API URL</span>
-                        <input type="text" id="backendApiBaseUrl" placeholder="https://api.example.com">
+                        <span>Горячая клавиша</span>
+                        <input type="text" id="openeduHotkey" class="hotkey-input" readonly>
                     </label>
                 </div>
-                <input type="number" id="backendRequestTimeoutMs" class="hidden" min="1000" step="250">
-                <div class="action-row">
-                    <button type="button" id="backendPingBtn" class="btn btn-sm btn-outline-dark">Проверить</button>
-                    <button type="button" id="backendResetUrlBtn" class="btn btn-sm btn-outline-secondary">Сбросить URL</button>
-                    <span id="backendPingStatus" class="status-text">Не проверено</span>
+                <div id="openeduAssistOptions" class="option-block hidden">
+                    <label class="check-row"><input type="checkbox" id="openeduAutoUseSimilarAnswers"><span>Использовать похожие вопросы</span></label>
+                    <label class="check-row"><input type="checkbox" id="openeduAutoUseFallbackAnswers"><span>Использовать популярные ответы без подтверждения</span></label>
+                    <label class="check-row"><input type="checkbox" id="openeduAutoCheckAnswers"><span>Нажимать «Проверить», если кнопка доступна</span></label>
+                    <label class="field">
+                        <span>Если ответа нет</span>
+                        <select id="openeduMissingAnswerAction">
+                            <option value="stop">Остановиться</option>
+                            <option value="alert">Показать вопрос</option>
+                            <option value="advance">Перейти дальше</option>
+                        </select>
+                    </label>
                 </div>
-            </div>
-        </section>
+                <div id="openeduAutoOptions" class="option-block hidden">
+                    <label class="check-row"><input type="checkbox" id="openeduAutoAdvanceEnabled"><span>Переходить к следующему разделу</span></label>
+                    <label class="check-row dependent" id="requiredCompletionRow"><input type="checkbox" id="openeduRequiredCompletionOnly"><span>Только когда текущий раздел выполнен</span></label>
+                    <label class="check-row"><input type="checkbox" id="openeduActiveTabRefreshEnabled"><span>Обновлять активный раздел</span></label>
+                    <label class="check-row"><input type="checkbox" id="openeduActiveTabPostSubmitRefreshEnabled"><span>Обновлять после проверки</span></label>
+                    <label class="check-row"><input type="checkbox" id="openeduShowFallbackStats"><span>Показывать резервную статистику</span></label>
+                    <label class="field">
+                        <span>Задержка перехода, мс</span>
+                        <input type="number" min="500" step="100" id="openeduAutoAdvanceDelayMs">
+                    </label>
+                </div>
+            </section>
 
-        <nav class="tabs" aria-label="Разделы расширения">
-            <button type="button" class="tab active" data-tab="openedu">OpenEdu</button>
-            <button type="button" class="tab" data-tab="moodle">Moodle</button>
-            <button type="button" class="tab" data-tab="stats">Stats</button>
-            <button type="button" class="tab" data-tab="diagnostics">Diagnostics</button>
-        </nav>
-
-        <section id="openeduSettings" class="panel tab-panel">
-            <div class="panel-head">
-                <h2>OpenEdu</h2>
-                <button type="button" id="platformOpenedu" class="platform-btn active">Активно</button>
-            </div>
-            <div class="segmented" role="radiogroup" aria-label="Режим OpenEdu">
-                <label><input type="radio" name="openeduMode" id="openeduModeStick" value="stick"><span>Палочка</span></label>
-                <label><input type="radio" name="openeduMode" id="openeduModeAssist" value="assist"><span>Авто-вставка</span></label>
-                <label><input type="radio" name="openeduMode" id="openeduModeAuto" value="autoSolve"><span>Авто-прохождение</span></label>
-            </div>
-            <div id="openeduStickOptions" class="option-block">
+            <section id="moodleSettings" class="panel tab-panel hidden">
+                <div class="panel-head">
+                    <h2>Moodle</h2>
+                    <button type="button" id="platformMoodle" class="platform-btn">Сделать активным</button>
+                </div>
+                <div class="segmented" role="radiogroup" aria-label="Режим Moodle">
+                    <label><input type="radio" name="moodleMode" value="wand"><span>Палочка</span></label>
+                    <label><input type="radio" name="moodleMode" value="autoInsert"><span>Авто-вставка</span></label>
+                    <label><input type="radio" name="moodleMode" value="autoSolve"><span>Авто-прохождение</span></label>
+                </div>
+                <div id="autoSolveControls" class="action-row hidden">
+                    <button id="btnStart" class="btn btn-sm btn-success" type="button">Старт</button>
+                    <button id="btnStop" class="btn btn-sm btn-danger hidden" type="button">Стоп</button>
+                </div>
                 <label class="field">
                     <span>Горячая клавиша</span>
-                    <input type="text" id="openeduHotkey" class="hotkey-input" readonly>
+                    <input type="text" id="wandKey" class="hotkey-input" readonly>
                 </label>
-            </div>
-            <div id="openeduAssistOptions" class="option-block hidden">
-                <label class="check-row"><input type="checkbox" id="openeduAutoUseSimilarAnswers"><span>Использовать похожие вопросы</span></label>
-                <label class="check-row"><input type="checkbox" id="openeduAutoUseFallbackAnswers"><span>Использовать популярные ответы без подтверждения</span></label>
-                <label class="check-row"><input type="checkbox" id="openeduAutoCheckAnswers"><span>Нажимать «Проверить», если кнопка доступна</span></label>
                 <label class="field">
-                    <span>Если ответа нет</span>
-                    <select id="openeduMissingAnswerAction">
-                        <option value="stop">Остановиться</option>
-                        <option value="alert">Показать вопрос</option>
-                        <option value="advance">Перейти дальше</option>
-                    </select>
+                    <span>Текст кнопки далее</span>
+                    <input type="text" id="nextBtnSelector">
                 </label>
-            </div>
-            <div id="openeduAutoOptions" class="option-block hidden">
-                <label class="check-row"><input type="checkbox" id="openeduAutoAdvanceEnabled"><span>Переходить к следующему разделу</span></label>
-                <label class="check-row dependent" id="requiredCompletionRow"><input type="checkbox" id="openeduRequiredCompletionOnly"><span>Только когда текущий раздел выполнен</span></label>
-                <label class="check-row"><input type="checkbox" id="openeduActiveTabRefreshEnabled"><span>Обновлять активный раздел</span></label>
-                <label class="check-row"><input type="checkbox" id="openeduActiveTabPostSubmitRefreshEnabled"><span>Обновлять после проверки</span></label>
-                <label class="check-row"><input type="checkbox" id="openeduShowFallbackStats"><span>Показывать резервную статистику</span></label>
-                <label class="field">
-                    <span>Задержка перехода, мс</span>
-                    <input type="number" min="500" step="100" id="openeduAutoAdvanceDelayMs">
-                </label>
-            </div>
-        </section>
+            </section>
 
-        <section id="moodleSettings" class="panel tab-panel hidden">
-            <div class="panel-head">
-                <h2>Moodle</h2>
-                <button type="button" id="platformMoodle" class="platform-btn">Сделать активным</button>
-            </div>
-            <div class="segmented" role="radiogroup" aria-label="Режим Moodle">
-                <label><input type="radio" name="moodleMode" id="modeWand" value="wand"><span>Палочка</span></label>
-                <label><input type="radio" name="moodleMode" id="modeAutoInsert" value="autoInsert"><span>Авто-вставка</span></label>
-                <label><input type="radio" name="moodleMode" id="modeAutoSolve" value="autoSolve"><span>Авто-прохождение</span></label>
-            </div>
-            <div id="autoSolveControls" class="action-row hidden">
-                <button id="btnStart" class="btn btn-sm btn-success" type="button">Старт</button>
-                <button id="btnStop" class="btn btn-sm btn-danger hidden" type="button">Стоп</button>
-            </div>
-            <label class="field">
-                <span>Горячая клавиша</span>
-                <input type="text" id="wandKey" class="hotkey-input" readonly>
-            </label>
-            <label class="field">
-                <span>Текст кнопки далее</span>
-                <input type="text" id="nextBtnSelector">
-            </label>
-        </section>
+            <section id="statsPanel" class="panel tab-panel hidden">
+                <div class="panel-head">
+                    <h2>Статистика</h2>
+                    <button type="button" id="statsRefreshBtn" class="btn btn-sm btn-outline-dark">Обновить</button>
+                </div>
+                <div id="statsGrid" class="stats-grid">
+                    <div><span>Курсы</span><strong id="statCourses">0</strong></div>
+                    <div><span>Тесты</span><strong id="statTests">0</strong></div>
+                    <div><span>Вопросы</span><strong id="statQuestions">0</strong></div>
+                    <div><span>Верно</span><strong id="statCompletions">0</strong></div>
+                </div>
+            </section>
 
-        <section id="statsPanel" class="panel tab-panel hidden">
-            <div class="panel-head">
-                <h2>Статистика</h2>
-                <button type="button" id="statsRefreshBtn" class="btn btn-sm btn-outline-dark">Обновить</button>
-            </div>
-            <div id="statsGrid" class="stats-grid">
-                <div><span>Курсы</span><strong id="statCourses">0</strong></div>
-                <div><span>Тесты</span><strong id="statTests">0</strong></div>
-                <div><span>Вопросы</span><strong id="statQuestions">0</strong></div>
-                <div><span>Верно</span><strong id="statCompletions">0</strong></div>
-            </div>
-        </section>
+            <section id="diagnosticsPanel" class="panel tab-panel hidden">
+                <div class="panel-head">
+                    <h2>Диагностика</h2>
+                    <button type="button" id="updateCheckBtn" class="btn btn-sm btn-outline-dark">Обновления</button>
+                </div>
+                <label class="check-row"><input type="checkbox" id="openeduDebugOverlay"><span>Показывать разметку вопросов на OpenEdu</span></label>
+                <div class="diagnostics-list">
+                    <div><span>Backend</span><strong id="backendCompactStatus">Не проверено</strong></div>
+                    <div><span>OpenEdu API</span><strong id="backendVersionStatus">V2</strong></div>
+                    <div><span>Update</span><strong id="updateStatus">Не проверено</strong></div>
+                    <div><span>Build</span><strong id="buildStatus">local</strong></div>
+                </div>
+            </section>
 
-        <section id="diagnosticsPanel" class="panel tab-panel hidden">
-            <div class="panel-head">
-                <h2>Диагностика</h2>
-                <button type="button" id="updateCheckBtn" class="btn btn-sm btn-outline-dark">Проверить обновления</button>
-            </div>
-            <label class="check-row"><input type="checkbox" id="openeduDebugOverlay"><span>Показывать разметку вопросов на OpenEdu</span></label>
-            <div class="diagnostics-list">
-                <div><span>Backend</span><strong id="backendCompactStatus">Не проверено</strong></div>
-                <div><span>Update</span><strong id="updateStatus">Не проверено</strong></div>
-                <div><span>Build</span><strong id="buildStatus">local</strong></div>
-            </div>
+            <button id="btnSave" class="btn btn-dark w-100" type="button">Сохранить</button>
         </section>
-
-        <button id="btnSave" class="btn btn-dark w-100" type="button">Сохранить</button>
     </main>
 
     <script src="../../js/build_config.js"></script>

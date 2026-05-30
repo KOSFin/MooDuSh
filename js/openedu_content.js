@@ -665,6 +665,10 @@
         return raw.trim().replace(/\/$/, '');
     }
 
+    function openeduApiPrefix() {
+        return settings?.openedu?.backendVersion === 'v1' ? '/v1' : '/v2';
+    }
+
     function getAuthHeaders(withJsonContentType) {
         const token = settings?.backend?.openedu?.apiToken || settings?.backend?.apiToken || '';
         const headers = {};
@@ -767,9 +771,16 @@
         const hasText = answers.some((option) => option.inputType === 'text');
         const hasCheckbox = answers.some((option) => option.inputType === 'checkbox');
         const hasRadio = answers.some((option) => option.inputType === 'radio');
-        const questionType = hasCheckbox
-            ? 'multiple_choice'
-            : (hasRadio ? 'single_choice' : (hasText ? 'text_input' : 'unknown'));
+        const hasDragTable = answers.some((option) => option.inputType === 'drag-table');
+        const hasDragOrder = answers.some((option) => option.inputType === 'drag-order');
+        const hasSelect = answers.some((option) => option.inputType === 'select');
+        const questionType = hasDragOrder
+            ? 'drag_order'
+            : (hasDragTable
+                ? 'drag_table'
+                : (hasCheckbox
+                    ? 'multiple_choice'
+                    : (hasRadio ? 'single_choice' : (hasText ? 'text_input' : (hasSelect ? 'select' : 'unknown')))));
         const questionFingerprint = typeof openeduShared.buildQuestionFingerprint === 'function'
             ? openeduShared.buildQuestionFingerprint(prompt, stableAnswers)
             : '';
@@ -1997,7 +2008,7 @@
         dragData.cells.forEach((cell) => {
             const cellId = String(cell.id || '').trim();
             const cellLabel = getDragMatchingCellLabel(cell);
-            if (!cellId || !cellLabel) {
+            if (!cellId) {
                 return;
             }
 
@@ -2008,7 +2019,7 @@
                     return;
                 }
 
-                const answerText = normalizeQuestionOptionText(cellLabel + ': ' + answerTitle);
+                const answerText = normalizeQuestionOptionText(cellLabel ? (cellLabel + ': ' + answerTitle) : answerTitle);
                 if (!answerText) {
                     return;
                 }
@@ -2029,10 +2040,10 @@
                     answerAliases: [answerTitle, cellLabel].filter(Boolean),
                     inputId: answerId,
                     inputName: '',
-                    groupKey,
+                    groupKey: cellLabel ? groupKey : (groupKey + ':order'),
                     groupPath: '',
                     inputPath: buildElementPath(root, answerElement),
-                    inputType: 'drag-table',
+                    inputType: cellLabel ? 'drag-table' : 'drag-order',
                     dragCellId: cellId,
                     dragAnswerId: answerId,
                     dragCellPath: buildElementPath(root, cell),
@@ -2873,7 +2884,8 @@
                 inputName,
                 groupKey,
                 groupPath,
-                inputPath: input instanceof HTMLInputElement ? buildElementPath(root, input) : ''
+                inputPath: input instanceof HTMLInputElement ? buildElementPath(root, input) : '',
+                inputType: input instanceof HTMLInputElement ? (input.type || 'radio') : 'label'
             });
         });
 
@@ -3371,6 +3383,10 @@
 
                 const byStatus = isQuestionCorrect(groupRoot);
                 const byOptions = groupOptions.some((item) => item.correct);
+                const normalizedGroupOptions = groupOptions.map((option) => Object.assign({}, option, {
+                    correct: Boolean(option.correct || (byStatus && option.selected)),
+                    incorrect: Boolean(option.incorrect)
+                }));
 
                 rawQuestions.push({
                     questionKey: '',
@@ -3381,7 +3397,7 @@
                     root: groupRoot,
                     prompt,
                     correct: byStatus || byOptions,
-                    options: groupOptions,
+                    options: normalizedGroupOptions,
                     allowsMultipleAnswers,
                     hasVerifiedAnswer: byStatus || byOptions,
                     fromVirtualContent: Boolean(ownerDoc.__PARAMEXT_VIRTUAL_CONTENT),
@@ -3496,7 +3512,7 @@
             questions: summarizeQuestionsForDebug(questions)
         });
 
-        const result = await postWithRetry('/v2/openedu/attempts', payload, 2);
+        const result = await postWithRetry(openeduApiPrefix() + '/openedu/attempts', payload, 2);
         debugSync('push_attempt_snapshot_result', {
             ok: result.ok,
             status: result.status,
@@ -3535,7 +3551,7 @@
             questionKeys: queryPayload.questionKeys
         });
 
-        const result = await postWithRetry('/v2/openedu/solutions/query', queryPayload, 1);
+        const result = await postWithRetry(openeduApiPrefix() + '/openedu/solutions/query', queryPayload, 1);
         const statsByQuestion = result?.data?.statsByQuestion;
         const statsKeys = statsByQuestion && typeof statsByQuestion === 'object' ? Object.keys(statsByQuestion) : [];
         const nonEmptyStatsKeys = statsKeys.filter((key) => {

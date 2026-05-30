@@ -12,7 +12,43 @@ self.addEventListener('unhandledrejection', (event) => {
 
 importScripts('background.js');
 
+const PARAMEXT_SETTINGS_KEY = 'paramExtPlatformSettingsV2';
+
+function getLocalStorage(keys) {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(keys, (result) => resolve(result || {}));
+    });
+}
+
+function openPrivacyPolicyTab() {
+    chrome.tabs.create({
+        url: chrome.runtime.getURL('/html/privacy_policy/index.html')
+    });
+}
+
+async function ensurePrivacyPolicyTab() {
+    const payload = await getLocalStorage(PARAMEXT_SETTINGS_KEY);
+    const accepted = Boolean(payload?.[PARAMEXT_SETTINGS_KEY]?.onboarding?.privacyAccepted);
+    if (!accepted) {
+        openPrivacyPolicyTab();
+    }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+    ensurePrivacyPolicyTab().catch(() => {});
+});
+
+chrome.runtime.onStartup.addListener(() => {
+    ensurePrivacyPolicyTab().catch(() => {});
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message && message.type === 'PARAMEXT_OPEN_PRIVACY_POLICY') {
+        openPrivacyPolicyTab();
+        sendResponse({ ok: true });
+        return;
+    }
+
     if (!message || message.type !== 'PARAMEXT_HTTP' || !message.request || typeof message.request.url !== 'string') {
         return;
     }

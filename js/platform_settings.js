@@ -34,6 +34,7 @@
         },
         openedu: {
             mode: 'stick',
+            backendVersion: 'v2',
             stickHotkey: 'Alt+KeyS',
             autoAdvanceEnabled: false,
             activeTabRefreshEnabled: true,
@@ -130,6 +131,9 @@
             if (openedu.mode === 'stick' || openedu.mode === 'assist' || openedu.mode === 'autoSolve') {
                 next.openedu.mode = openedu.mode;
             }
+            if (openedu.backendVersion === 'v1' || openedu.backendVersion === 'v2') {
+                next.openedu.backendVersion = openedu.backendVersion;
+            }
             next.openedu.stickHotkey = normalizeHotkey(openedu.stickHotkey, next.openedu.stickHotkey);
             next.openedu.autoAdvanceEnabled = Boolean(openedu.autoAdvanceEnabled);
             next.openedu.activeTabRefreshEnabled = Boolean(openedu.activeTabRefreshEnabled);
@@ -219,6 +223,24 @@
             }
             if (typeof legacy.nextBtnText === 'string' && legacy.nextBtnText.trim().length > 0) {
                 migrated.moodle.nextButtonText = legacy.nextBtnText.trim();
+            }
+            migrated.onboarding.privacyAccepted = Boolean(legacy.privacyPolicyAcceptedByUser);
+            migrated.onboarding.allowTechnicalDataCollection = legacy.allowTechnicalDataCollection !== false;
+            migrated.onboarding.completed = Boolean(legacy.privacyPolicyAcceptedByUser && legacy.backend?.apiToken);
+            if (legacy.backend && typeof legacy.backend === 'object') {
+                if (typeof legacy.backend.apiBaseUrl === 'string' && legacy.backend.apiBaseUrl.trim().length > 0) {
+                    const normalizedUrl = legacy.backend.apiBaseUrl.trim().replace(/\/$/, '');
+                    migrated.backend.moodle.apiBaseUrl = normalizedUrl;
+                    migrated.backend.openedu.apiBaseUrl = normalizedUrl;
+                }
+                if (typeof legacy.backend.apiToken === 'string') {
+                    const token = legacy.backend.apiToken.trim();
+                    migrated.backend.moodle.apiToken = token;
+                    migrated.backend.openedu.apiToken = token;
+                }
+                const timeoutMs = Math.max(1000, toNumberOrFallback(legacy.backend.requestTimeoutMs, migrated.backend.openedu.requestTimeoutMs));
+                migrated.backend.moodle.requestTimeoutMs = timeoutMs;
+                migrated.backend.openedu.requestTimeoutMs = timeoutMs;
             }
             migrated.moodle.autoSolving = Boolean(legacy.autoSolving);
 

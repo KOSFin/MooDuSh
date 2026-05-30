@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { JSDOM } = require('jsdom');
 
 const courseApi = require('../js/openedu_course_api.js');
 const parser = require('../js/openedu_parser.js');
@@ -83,4 +84,28 @@ test('OpenEdu V2 parser fingerprint is stable across answer order', () => {
     const first = parser.fingerprintQuestion('Что такое истина?', ['соответствие', 'мнение']);
     const second = parser.fingerprintQuestion('Что такое истина?', ['мнение', 'соответствие']);
     assert.equal(first, second);
+});
+
+test('OpenEdu V2 parser detects single-cell drag ordering tasks', () => {
+    const html = `
+        <div class="xblock-student_view-problem">
+            <h2 class="problem-header">Укажите порядок построения точки пересечения прямой с плоскостью</h2>
+            <div class="problem">
+                <textarea name="answer" hidden class="answer"></textarea>
+                <table class="answerPlaceStudent drag-table"><tbody><tr><td class="cell ui-sortable" id="slot1"></td></tr></tbody></table>
+                <div id="allAnswers" class="answerPlaceStudent">
+                    <div class="dragAnswer" id="a1">Построить линию пересечения</div>
+                    <div class="dragAnswer" id="a2">Определить участки видимости</div>
+                </div>
+                <button class="check Check">Проверить</button>
+            </div>
+        </div>`;
+    const dom = new JSDOM(html, { url: 'https://apps.openedu.ru/' });
+    const questions = parser.parseDocumentTree(dom.window.document, { sourceUrl: 'fixture://drag-order' });
+    const drag = questions.find((question) => question.questionType === 'drag_order');
+
+    assert.ok(drag);
+    assert.equal(drag.answers.length, 2);
+    assert.equal(drag.prompt, 'Укажите порядок построения точки пересечения прямой с плоскостью');
+    assert.ok(drag.parseConfidence >= 0.8);
 });
