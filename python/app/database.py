@@ -310,6 +310,18 @@ def is_exact_question_content_match(
     return True
 
 
+def merge_key_order(primary: list[str], extra: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for key in [*primary, *extra]:
+        value = str(key or '').strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
 class Database:
     def __init__(self) -> None:
         self.pool: asyncpg.Pool | None = None
@@ -1791,7 +1803,7 @@ class Database:
                     await self._upsert_openedu_v2_hierarchy(conn, context, course)
                     answers = question.get('answers', [])
                     raw_answer_entries = []
-                    for answer in answers:
+                    for answer_index, answer in enumerate(answers):
                         answer_key = str(answer.get('answerKey') or answer.get('answerFingerprint') or '').strip()
                         if not answer_key:
                             continue
@@ -1805,6 +1817,7 @@ class Database:
                             'correct': bool(answer.get('correct')),
                             'incorrect': bool(answer.get('incorrect')),
                             'input_type': str(answer.get('inputType') or ''),
+                            'order_index': answer_index,
                         })
 
                     answer_texts = [
@@ -1839,15 +1852,20 @@ class Database:
 
                     accepted += 1
                     question_correct = bool(question.get('isCorrect'))
-                    selected_keys = {entry['answer_key'] for entry in raw_answer_entries if entry['selected']}
-                    current_verified = {
-                        entry['answer_key'] for entry in raw_answer_entries
+                    selected_key_list = merge_key_order([
+                        entry['answer_key'] for entry in raw_answer_entries if entry['selected']
+                    ], [])
+                    current_verified_list = merge_key_order([
+                        entry['answer_key']
+                        for entry in raw_answer_entries
                         if question_correct and entry['selected'] and entry['correct']
-                    }
-                    current_incorrect = {
-                        entry['answer_key'] for entry in raw_answer_entries
-                        if entry['selected'] and entry['incorrect']
-                    }
+                    ], [])
+                    current_incorrect_list = merge_key_order([
+                        entry['answer_key'] for entry in raw_answer_entries if entry['selected'] and entry['incorrect']
+                    ], [])
+                    selected_keys = set(selected_key_list)
+                    current_verified = set(current_verified_list)
+                    current_incorrect = set(current_incorrect_list)
 
                     previous_state = await conn.fetchrow(
                         """
@@ -1862,8 +1880,10 @@ class Database:
                     prev_verified = set(previous_state['verified_answer_keys'] or []) if previous_state else set()
                     prev_incorrect = set(previous_state['incorrect_answer_keys'] or []) if previous_state else set()
                     prev_correct = bool(previous_state['is_correct']) if previous_state else False
-                    verified_keys = current_verified | prev_verified
-                    incorrect_keys = current_incorrect | prev_incorrect
+                    verified_key_list = merge_key_order(current_verified_list, list(previous_state['verified_answer_keys'] or []) if previous_state else [])
+                    incorrect_key_list = merge_key_order(current_incorrect_list, list(previous_state['incorrect_answer_keys'] or []) if previous_state else [])
+                    verified_keys = set(verified_key_list)
+                    incorrect_keys = set(incorrect_key_list)
                     if prev_correct:
                         question_correct = True
                     completed_delta = 1 if question_correct and not prev_correct else 0
@@ -1966,9 +1986,9 @@ class Database:
                         participant_key,
                         question_key,
                         user_id,
-                        sorted(selected_keys),
-                        sorted(verified_keys),
-                        sorted(incorrect_keys),
+                        selected_key_list,
+                        verified_key_list,
+                        incorrect_key_list,
                         question_correct,
                         str(client.get('extensionVersion') or ''),
                         str(client.get('buildId') or ''),
@@ -1997,8 +2017,33 @@ class Database:
                 test_key,
                 question_keys,
             )
+            order_rows = await conn.fetch(
+                """
+                SELECT question_key, verified_answer_keys
+                FROM (
+                    SELECT question_key,
+                           verified_answer_keys,
+                           ROW_NUMBER() OVER (PARTITION BY question_key ORDER BY updated_at DESC) AS rn
+                    FROM openedu_v2_participant_question_state
+                    WHERE test_key = $1
+                      AND question_key = ANY($2::text[])
+                      AND is_correct
+                      AND array_length(verified_answer_keys, 1) > 0
+                ) ranked
+                WHERE rn = 1
+                """,
+                test_key,
+                question_keys,
+            )
 
         completed_map = {row['question_key']: int(row['completed_count']) for row in question_rows}
+        order_map = {
+            row['question_key']: {
+                str(answer_key): index
+                for index, answer_key in enumerate(row['verified_answer_keys'] or [])
+            }
+            for row in order_rows
+        }
         result = {
             qk: {'completedCount': completed_map.get(qk, 0), 'verifiedAnswers': [], 'incorrectAnswers': [], 'fallbackAnswers': []}
             for qk in question_keys
@@ -2010,12 +2055,21 @@ class Database:
             v = int(row['verified_count'])
             i = int(row['incorrect_count'])
             f = int(row['fallback_count'])
+            order_index = order_map.get(row['question_key'], {}).get(row['answer_key'])
+            order_payload = {'orderIndex': order_index} if order_index is not None else {}
             if v > 0:
-                entry['verifiedAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': v})
+                entry['verifiedAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': v, **order_payload})
             if i > 0:
-                entry['incorrectAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': i})
+                entry['incorrectAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': i, **order_payload})
             if f > 0:
-                entry['fallbackAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': f})
+                entry['fallbackAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': f, **order_payload})
+        for entry in result.values():
+            for key in ('verifiedAnswers', 'incorrectAnswers', 'fallbackAnswers'):
+                entry[key].sort(key=lambda item: (
+                    item.get('orderIndex') is None,
+                    int(item.get('orderIndex') if item.get('orderIndex') is not None else 0),
+                    -int(item.get('count') or 0),
+                ))
         return result
 
     async def write_client_log_v2(self, payload: dict[str, Any], user_id: int | None = None) -> None:

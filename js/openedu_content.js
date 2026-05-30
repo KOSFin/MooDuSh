@@ -3353,18 +3353,43 @@
             normalized.push({
                 answerKey: typeof item?.answerKey === 'string' ? item.answerKey : '',
                 answerText,
-                count: Math.max(0, Number(item?.count || 0))
+                count: Math.max(0, Number(item?.count || 0)),
+                orderIndex: Number.isFinite(Number(item?.orderIndex)) ? Number(item.orderIndex) : null,
+                _sourceIndex: normalized.length
             });
         });
 
         normalized.sort((a, b) => {
+            const aOrder = Number.isFinite(Number(a.orderIndex)) ? Number(a.orderIndex) : null;
+            const bOrder = Number.isFinite(Number(b.orderIndex)) ? Number(b.orderIndex) : null;
+            if (aOrder !== null || bOrder !== null) {
+                if (aOrder === null) {
+                    return 1;
+                }
+                if (bOrder === null) {
+                    return -1;
+                }
+                if (aOrder !== bOrder) {
+                    return aOrder - bOrder;
+                }
+            }
             if (b.count !== a.count) {
                 return b.count - a.count;
             }
-            return a.answerText.localeCompare(b.answerText);
+            return a._sourceIndex - b._sourceIndex;
         });
 
-        return normalized.slice(0, MAX_ANSWERS_PER_QUESTION);
+        return normalized.slice(0, MAX_ANSWERS_PER_QUESTION).map((item) => {
+            const clean = {
+                answerKey: item.answerKey,
+                answerText: item.answerText,
+                count: item.count
+            };
+            if (Number.isFinite(Number(item.orderIndex))) {
+                clean.orderIndex = Number(item.orderIndex);
+            }
+            return clean;
+        });
     }
 
     function mergeAnswerStatsLists(primary, extra) {
@@ -3380,16 +3405,21 @@
                 const answerKey = typeof item?.answerKey === 'string' ? item.answerKey : '';
                 const sig = answerKey + '|' + normalizeText(answerText);
                 const count = Math.max(0, Number(item?.count || 0));
+                const orderIndex = Number.isFinite(Number(item?.orderIndex)) ? Number(item.orderIndex) : null;
                 const previous = map.get(sig);
                 if (previous) {
                     previous.count = Math.max(previous.count, count);
+                    if (previous.orderIndex === null || (orderIndex !== null && orderIndex < previous.orderIndex)) {
+                        previous.orderIndex = orderIndex;
+                    }
                     return;
                 }
 
                 map.set(sig, {
                     answerKey,
                     answerText,
-                    count
+                    count,
+                    orderIndex: Number.isFinite(Number(item?.orderIndex)) ? Number(item.orderIndex) : null
                 });
             });
         });
@@ -4681,13 +4711,16 @@
         const targetCellIds = new Set(targets.map((target) => target.cellId));
         const targetAnswerIds = new Set(targets.map((target) => target.answerId));
         const modeName = typeof mode === 'string' ? mode : 'add';
+        const isDragOrder = dragData.cells.length === 1 || targetCellIds.size === 1;
         if (modeName === 'set-all' && dragData.answerBank instanceof HTMLElement) {
             dragData.cells.forEach((cell) => {
                 Array.from(cell.querySelectorAll('.dragAnswer[id]')).forEach((answerElement) => {
-                    if (!(answerElement instanceof HTMLElement) || targetAnswerIds.has(answerElement.id)) {
+                    if (!(answerElement instanceof HTMLElement)) {
                         return;
                     }
-                    dragData.answerBank.appendChild(answerElement);
+                    if (isDragOrder || !targetAnswerIds.has(answerElement.id)) {
+                        dragData.answerBank.appendChild(answerElement);
+                    }
                 });
             });
         }
@@ -4700,7 +4733,7 @@
                 return;
             }
 
-            if (modeName === 'set-all') {
+            if (modeName === 'set-all' && !isDragOrder) {
                 Array.from(cell.querySelectorAll('.dragAnswer[id]')).forEach((existing) => {
                     if (!(existing instanceof HTMLElement) || existing.id === target.answerId || !(dragData.answerBank instanceof HTMLElement)) {
                         return;
@@ -5552,6 +5585,7 @@
             return [];
         }
 
+        const isDragOrder = options.some((option) => option.inputType === 'drag-order');
         const byKey = new Map();
         const byText = new Map();
         options.forEach((option) => {
@@ -5572,13 +5606,15 @@
 
         const resolved = [];
         const seenCells = new Set();
+        const seenAnswers = new Set();
         (Array.isArray(answers) ? answers : []).forEach((answer) => {
             const rawKey = String(answer?.answerKey || '').trim();
             const rawText = String(answer?.answerText || answer || '').trim();
             const target = byKey.get(rawKey) || byText.get(normalizeMatchingTargetKey(rawText));
-            if (!target || seenCells.has(target.cellId)) {
+            if (!target || seenAnswers.has(target.answerId) || (!isDragOrder && seenCells.has(target.cellId))) {
                 return;
             }
+            seenAnswers.add(target.answerId);
             seenCells.add(target.cellId);
             resolved.push(target);
         });
@@ -5595,6 +5631,20 @@
         const targets = resolveDragMatchingTargets(block, answers);
         if (targets.length === 0) {
             return false;
+        }
+
+        const targetCellIds = new Set(targets.map((target) => target.cellId));
+        if (dragData.cells.length === 1 || targetCellIds.size === 1) {
+            const cell = dragData.container.querySelector('#' + escapeSelector(targets[0].cellId));
+            if (!(cell instanceof HTMLElement)) {
+                return false;
+            }
+
+            const currentIds = Array.from(cell.querySelectorAll('.dragAnswer[id]'))
+                .map((answer) => String(answer.id || '').trim())
+                .filter(Boolean);
+            const expectedIds = targets.map((target) => target.answerId);
+            return expectedIds.every((answerId, index) => currentIds[index] === answerId);
         }
 
         return targets.every((target) => {
