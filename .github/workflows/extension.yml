@@ -11,7 +11,12 @@ on:
         description: Create GitHub Release
         type: boolean
         required: false
-        default: false
+        default: true
+      version:
+        description: Release version/tag. Defaults to manifest.json version.
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -61,7 +66,7 @@ jobs:
           BOT_LINK: ${{ vars.BOT_LINK }}
           REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
           UPDATE_CHECK_URL: ${{ vars.UPDATE_CHECK_URL }}
-          BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'dev' }}
+          BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
           BUILD_ID: ${{ github.sha }}
           RELEASE_PUBLIC_KEY: ${{ vars.RELEASE_PUBLIC_KEY }}
         run: npm run build:extension
@@ -70,7 +75,7 @@ jobs:
           RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY }}
           REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
           BUILD_ID: ${{ github.sha }}
-          BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'dev' }}
+          BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
         run: npm run release:manifest
       - uses: actions/upload-artifact@v4
         with:
@@ -82,14 +87,70 @@ jobs:
   release:
     runs-on: ubuntu-latest
     needs: package
-    if: ${{ (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.release == true) }}
+    if: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.release == true) }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: moodush-extension
           path: dist
+      - name: Resolve release tag
+        id: release_meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version || '' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_VERSION}" ]]; then
+            TAG_NAME="${INPUT_VERSION}"
+            if [[ "${TAG_NAME}" != v* ]]; then
+              TAG_NAME="v${TAG_NAME}"
+            fi
+          else
+            VERSION="$(node -p "require('./manifest.json').version")"
+            TAG_NAME="v${VERSION}"
+          fi
+
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            RELEASE_EXISTS="true"
+          else
+            RELEASE_EXISTS="false"
+          fi
+
+          SHOULD_PUBLISH="true"
+          if [[ "${RELEASE_EXISTS}" == "true" && "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            SHOULD_PUBLISH="false"
+          fi
+
+          echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "release_exists=${RELEASE_EXISTS}" >> "${GITHUB_OUTPUT}"
+          echo "should_publish=${SHOULD_PUBLISH}" >> "${GITHUB_OUTPUT}"
+          echo "Release tag: ${TAG_NAME}"
+          echo "Release exists: ${RELEASE_EXISTS}"
+          echo "Should publish: ${SHOULD_PUBLISH}"
+      - name: Create or move tag when release is missing
+        if: ${{ steps.release_meta.outputs.release_exists == 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${{ steps.release_meta.outputs.tag_name }}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${{ steps.release_meta.outputs.tag_name }}" --force
+      - name: Existing release on branch push
+        if: ${{ steps.release_meta.outputs.should_publish == 'false' }}
+        run: echo "Release ${{ steps.release_meta.outputs.tag_name }} already exists; bump manifest.json version or run manually to update assets."
       - uses: softprops/action-gh-release@v2
+        if: ${{ steps.release_meta.outputs.should_publish == 'true' }}
         with:
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          fail_on_unmatched_files: true
           files: |
             dist/moodush-extension.zip
             dist/release-manifest.json
