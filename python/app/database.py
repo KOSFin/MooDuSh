@@ -2708,7 +2708,7 @@ class Database:
                          q.parse_confidence, q.chapter_id, q.sequential_id, q.vertical_id,
                          q.updated_at, q.completed_count
                 ORDER BY q.updated_at DESC
-                LIMIT 50
+                LIMIT 300
                 """,
                 course_filter,
             )
@@ -2719,7 +2719,7 @@ class Database:
                     FROM openedu_v2_questions
                     WHERE course_id = $1
                     ORDER BY updated_at DESC
-                    LIMIT 50
+                    LIMIT 300
                 )
                 SELECT a.test_key, a.question_key, a.answer_key, a.answer_text,
                        a.extension_version, a.build_id, a.parser_version,
@@ -2782,9 +2782,19 @@ class Database:
             item['answers'] = answers_by_question.get((item['test_key'], item['question_key']), [])[:8]
             recent_question_items.append(item)
 
+        questions_by_vertical: dict[str, list[dict[str, Any]]] = {}
+        orphan_questions: list[dict[str, Any]] = []
+        for item in recent_question_items:
+            vertical_id = str(item.get('vertical_id') or '')
+            if vertical_id:
+                questions_by_vertical.setdefault(vertical_id, []).append(item)
+            else:
+                orphan_questions.append(item)
+
         vertical_items = [dict(r) for r in verticals]
         verticals_by_seq: dict[str, list[dict[str, Any]]] = {}
         for item in vertical_items:
+            item['questions'] = questions_by_vertical.get(str(item.get('vertical_id') or ''), [])
             verticals_by_seq.setdefault(item.get('sequential_id') or '', []).append(item)
 
         sequential_items = [dict(r) for r in sequentials]
@@ -2804,6 +2814,7 @@ class Database:
             'sequentials': sequential_items,
             'verticals': vertical_items,
             'recent_questions': recent_question_items,
+            'orphan_questions': orphan_questions,
             'version_stats': [dict(r) for r in version_stats],
             'type_stats': [dict(r) for r in type_stats],
             'reports': [dict(r) for r in reports],

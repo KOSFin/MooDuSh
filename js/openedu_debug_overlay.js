@@ -15,29 +15,8 @@
             [${ATTR}="answer-correct"] { outline: 3px solid rgba(22, 163, 74, .95) !important; outline-offset: 1px !important; }
             [${ATTR}="answer-incorrect"] { outline: 3px solid rgba(220, 38, 38, .9) !important; outline-offset: 1px !important; }
             [${ATTR}="control"] { outline: 2px dashed rgba(245, 158, 11, .85) !important; outline-offset: 2px !important; }
-            [${ATTR}="answer-correct"],
-            [${ATTR}="answer-incorrect"],
-            [${ATTR}="answer"],
-            [${ATTR}="control"],
-            [${ATTR}="prompt"] { position: relative !important; }
-            [${ATTR}="answer-correct"]::after,
-            [${ATTR}="answer-incorrect"]::after,
-            [${ATTR}="control"]::after {
-                position: absolute;
-                right: 4px;
-                top: 2px;
-                z-index: 2147483000;
-                padding: 1px 5px;
-                border-radius: 4px;
-                color: #fff;
-                font: 10px/1.3 system-ui, sans-serif;
-                pointer-events: none;
-            }
-            [${ATTR}="answer-correct"]::after { content: "correct"; background: rgba(22, 101, 52, .92); }
-            [${ATTR}="answer-incorrect"]::after { content: "wrong"; background: rgba(153, 27, 27, .92); }
-            [${ATTR}="control"]::after { content: "control"; background: rgba(146, 64, 14, .92); }
             .moodush-openedu-debug-label {
-                position: absolute;
+                position: fixed;
                 z-index: 2147483000;
                 padding: 2px 6px;
                 border-radius: 4px;
@@ -84,9 +63,10 @@
         const label = doc.createElement('div');
         const rect = rootNode.getBoundingClientRect();
         label.className = 'moodush-openedu-debug-label';
+        label.setAttribute('data-moodush-extension', 'openedu-debug-overlay');
         label.textContent = text;
-        label.style.left = Math.max(4, rect.left + doc.defaultView.scrollX) + 'px';
-        label.style.top = Math.max(4, rect.top + doc.defaultView.scrollY - 18) + 'px';
+        label.style.left = Math.max(4, rect.left) + 'px';
+        label.style.top = Math.max(4, rect.top - 18) + 'px';
         doc.body.appendChild(label);
     }
 
@@ -134,7 +114,7 @@
             return '';
         }
         const clone = node.cloneNode(true);
-        clone.querySelectorAll('script, style, noscript, template, link, meta, button, [hidden], [aria-hidden="true"], .moodush-openedu-inline-menu').forEach((item) => item.remove());
+        clone.querySelectorAll('script, style, noscript, template, link, meta, button, [hidden], [aria-hidden="true"], [data-moodush-extension], .moodush-openedu-debug-label, .moodush-openedu-inline-menu').forEach((item) => item.remove());
         return normalizedText(clone.textContent || '');
     }
 

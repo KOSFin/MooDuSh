@@ -102,15 +102,29 @@ async def legacy_status() -> dict:
 @app.get('/v2/update')
 @app.get('/api/v2/update')
 async def legacy_update(version: str = '', build_id: str = '') -> dict:
-    latest = settings.extension_latest_version or '2.9.6'
+    latest = settings.extension_project_version or settings.extension_latest_version or '2.9.6'
     required = settings.extension_required_version or ''
     return {
         'updateRequired': bool(version and version != latest),
         'latestVersion': latest,
+        'projectVersion': latest,
         'requiredVersion': required,
         'releaseUrl': settings.extension_release_url,
         'repositoryUrl': settings.extension_repository_url,
         'buildKnown': _is_known_build_id(build_id),
+    }
+
+
+@app.get('/v2/version')
+@app.get('/api/v2/version')
+async def extension_project_version() -> dict:
+    version = settings.extension_project_version or settings.extension_latest_version or '2.9.6'
+    return {
+        'projectVersion': version,
+        'latestVersion': version,
+        'requiredVersion': settings.extension_required_version or '',
+        'releaseUrl': settings.extension_release_url,
+        'repositoryUrl': settings.extension_repository_url,
     }
 
 
@@ -254,15 +268,17 @@ async def post_extension_log(payload: LogPayloadIn, user_id: Optional[int] = Dep
 async def post_extension_log_v2(request: Request, payload: LogPayloadV2In, user_id: Optional[int] = Depends(require_api_token)) -> dict:
     serialized = payload.model_dump()
     await database.write_client_log_v2(serialized, user_id=user_id)
-    spawn_forward_v2(
-        serialized['kind'],
-        serialized.get('payload') or {},
-        serialized.get('system') or {},
-        serialized.get('client') or {},
-        {
-            'user_id': user_id,
-            'auth_type': getattr(request.state, 'auth_token_type', ''),
-            'severity': serialized.get('severity') or 'error',
-        },
-    )
+    severity = serialized.get('severity') or 'error'
+    if severity in {'warning', 'error', 'critical'}:
+        spawn_forward_v2(
+            serialized['kind'],
+            serialized.get('payload') or {},
+            serialized.get('system') or {},
+            serialized.get('client') or {},
+            {
+                'user_id': user_id,
+                'auth_type': getattr(request.state, 'auth_token_type', ''),
+                'severity': severity,
+            },
+        )
     return {'ok': True}

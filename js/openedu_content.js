@@ -449,7 +449,9 @@
                 try {
                     event.source.postMessage({
                         type: 'PARAMEXT_OPENEDU_CONTEXT_REPLY',
-                        context: getCourseContext(true)
+                        context: Object.assign({}, getCourseContext(true), {
+                            courseVerticals: openeduCourseVerticals
+                        })
                     }, '*');
                 } catch (e) {}
             } else if (event.data.type === 'PARAMEXT_OPENEDU_QUESTIONS_SYNC') {
@@ -790,6 +792,10 @@
         };
     }
 
+    function isDebugOverlayEnabled() {
+        return Boolean(settings?.diagnostics?.openeduDebugOverlay);
+    }
+
     async function refreshCourseDiscovery(force) {
         if (!isTopFrame || !window.ParamExtOpeneduCourseApi || typeof window.ParamExtOpeneduCourseApi.discoverCurrentCourse !== 'function') {
             return;
@@ -854,12 +860,18 @@
             || findOpeneduCourseId(source)
             || findOpeneduCourseId(document.referrer || '')
             || courseIdFromBlockId(verticalId);
-        const matched = openeduCourseVerticals.find((item) => item.verticalId === verticalId)
-            || openeduCourseVerticals.find((item) => item.courseId === courseId)
+        const topContextVerticals = Array.isArray(window.__PARAMEXT_TOP_CONTEXT?.courseVerticals)
+            ? window.__PARAMEXT_TOP_CONTEXT.courseVerticals
+            : [];
+        const knownVerticals = openeduCourseVerticals.length > 0 ? openeduCourseVerticals : topContextVerticals;
+        const matched = knownVerticals.find((item) => item.verticalId === verticalId)
             || {};
+        const courseMatch = matched.courseId
+            ? matched
+            : (knownVerticals.find((item) => item.courseId === courseId) || {});
         return {
             courseId: matched.courseId || courseId,
-            courseTitle: matched.courseTitle || document.title || '',
+            courseTitle: matched.courseTitle || courseMatch.courseTitle || document.title || '',
             chapterId: matched.chapterId || '',
             chapterTitle: matched.chapterTitle || '',
             sequentialId: matched.sequentialId || '',
@@ -1463,7 +1475,7 @@
         let path = location.pathname;
         let fullUrl = location.href;
 
-        if (document.referrer) {
+        if (document.referrer && !extractOpeneduBlockId(location.href)) {
             try {
                 const ref = new URL(document.referrer);
                 if (HOST_RE.test(ref.hostname)) {
@@ -6115,6 +6127,7 @@
                 menu = document.createElement('span');
                 menu.className = INLINE_MENU_CLASS;
                 menu.setAttribute(INLINE_WAND_ATTR, question.questionKey);
+                menu.setAttribute('data-moodush-extension', 'openedu-inline-menu');
 
                 const anchor = block.querySelector('.problem-header, .problem-title, .question-title, legend, h3') || block;
                 if (anchor.firstChild) {
@@ -6697,6 +6710,7 @@
         wandToggle.id = WAND_TOGGLE_ID;
         wandToggle.type = 'button';
         wandToggle.className = 'moodush-openedu-wand-toggle';
+        wandToggle.setAttribute('data-moodush-extension', 'openedu-wand-toggle');
         wandToggle.textContent = '|*';
         wandToggle.title = 'MooDuSh OpenEdu: показать статистику';
         wandToggle.addEventListener('click', () => {
@@ -6706,6 +6720,7 @@
         stickRoot = document.createElement('aside');
         stickRoot.id = STICK_ID;
         stickRoot.className = 'moodush-openedu-stick hidden';
+        stickRoot.setAttribute('data-moodush-extension', 'openedu-stick');
 
         const header = document.createElement('div');
         header.className = 'moodush-stick-header';
@@ -6774,6 +6789,7 @@
                 ),
                 fromIframe: true,
                 fromVirtualContent: Boolean(question.fromVirtualContent),
+                course: question.course || getCourseRefForQuestion(question),
                 options: (Array.isArray(question.options) ? question.options : []).map((option) => ({
                     answerKey: option.answerKey,
                     answerText: sanitizeAnswerText(option.answerText),
@@ -6837,8 +6853,16 @@
             const questions = parseQuestions();
             iframeQuestionsCache = questions;
             lastParsedQuestionCount = questions.length;
+            const debugOverlayEnabled = isDebugOverlayEnabled();
             if (window.ParamExtOpeneduDebugOverlay) {
-                window.ParamExtOpeneduDebugOverlay.render(questions, Boolean(settings?.diagnostics?.openeduDebugOverlay));
+                window.ParamExtOpeneduDebugOverlay.render(questions, debugOverlayEnabled);
+            }
+            if (debugOverlayEnabled && allowNetwork) {
+                allowNetwork = false;
+                debugSync('cycle_network_disabled_for_debug_overlay', {
+                    source,
+                    questionCount: questions.length
+                });
             }
             if (questions.length > 0) {
                 lastMeaningfulQuestionsAt = now;

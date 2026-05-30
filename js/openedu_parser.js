@@ -113,7 +113,7 @@
             return '';
         }
         const clone = node.cloneNode(true);
-        clone.querySelectorAll('script, style, noscript, template, link, meta, button, [hidden], [aria-hidden="true"], .moodush-openedu-inline-menu, .MathJax_Preview, .MJX_Assistive_MathML, mjx-assistive-mml').forEach((item) => item.remove());
+        clone.querySelectorAll('script, style, noscript, template, link, meta, button, [hidden], [aria-hidden="true"], [data-moodush-extension], [data-moodush-openedu-debug], .moodush-openedu-debug-label, .moodush-openedu-inline-menu, .moodush-openedu-inline-popover, .moodush-openedu-wand-toggle, .moodush-openedu-stick, .MathJax_Preview, .MJX_Assistive_MathML, mjx-assistive-mml').forEach((item) => item.remove());
         return collapseWhitespace(clone.textContent || '');
     }
 
@@ -331,6 +331,13 @@
             'script',
             'style',
             'button',
+            '[data-moodush-extension]',
+            '[data-moodush-openedu-debug]',
+            '.moodush-openedu-debug-label',
+            '.moodush-openedu-inline-menu',
+            '.moodush-openedu-inline-popover',
+            '.moodush-openedu-wand-toggle',
+            '.moodush-openedu-stick',
             'input',
             'textarea',
             'select',

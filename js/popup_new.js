@@ -363,6 +363,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    async function refreshProjectVersion() {
+        const baseUrl = settings.backend.openedu.apiBaseUrl || defaultOpeneduUrl();
+        if (!baseUrl) {
+            return;
+        }
+
+        try {
+            const response = await fetch(baseUrl + '/v2/version', { cache: 'no-store' });
+            if (!response.ok) {
+                return;
+            }
+            const data = await response.json();
+            const projectVersion = data.projectVersion || data.latestVersion || '';
+            if (projectVersion) {
+                refs.versionPill.textContent = 'v' + projectVersion;
+            }
+        } catch (_) {
+            refs.versionPill.textContent = 'v' + (manifest.version || 'unknown');
+        }
+    }
+
     function bindHotkey(input) {
         input.addEventListener('keydown', (event) => {
             if (event.key === 'Tab') {
@@ -500,6 +521,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     bindHotkey(refs.openeduHotkey);
 
     applyStateToUi();
+    refreshProjectVersion();
     pingBackend();
     checkUpdate();
     refreshStats();

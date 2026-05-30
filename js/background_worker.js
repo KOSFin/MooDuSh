@@ -10,6 +10,80 @@ self.addEventListener('unhandledrejection', (event) => {
     }
 });
 
+const PRIVACY_POLICY_PATH = '/html/privacy_policy/index.html';
+let nativeTabsCreate = null;
+let nativeTabsQuery = null;
+let nativeTabsUpdate = null;
+let nativeWindowsUpdate = null;
+let privacyPolicyCreateGuardInFlight = false;
+
+function isPrivacyPolicyUrl(url) {
+    const value = String(url || '');
+    return value.includes(PRIVACY_POLICY_PATH) || value.includes('/html/privacy_policy/index.html');
+}
+
+function installPrivacyPolicyTabsGuard() {
+    if (typeof chrome === 'undefined' || !chrome.tabs || typeof chrome.tabs.create !== 'function') {
+        return;
+    }
+
+    nativeTabsCreate = chrome.tabs.create.bind(chrome.tabs);
+    nativeTabsQuery = typeof chrome.tabs.query === 'function' ? chrome.tabs.query.bind(chrome.tabs) : null;
+    nativeTabsUpdate = typeof chrome.tabs.update === 'function' ? chrome.tabs.update.bind(chrome.tabs) : null;
+    nativeWindowsUpdate = chrome.windows && typeof chrome.windows.update === 'function'
+        ? chrome.windows.update.bind(chrome.windows)
+        : null;
+
+    chrome.tabs.create = (createProperties, callback) => {
+        const url = createProperties && typeof createProperties === 'object' ? createProperties.url : '';
+        if (!isPrivacyPolicyUrl(url)) {
+            return nativeTabsCreate(createProperties, callback);
+        }
+
+        openPrivacyPolicyTabGuarded(url, callback);
+        return undefined;
+    };
+}
+
+function openPrivacyPolicyTabGuarded(url, callback) {
+    if (privacyPolicyCreateGuardInFlight) {
+        if (typeof callback === 'function') {
+            callback();
+        }
+        return;
+    }
+
+    privacyPolicyCreateGuardInFlight = true;
+    const finalUrl = url || chrome.runtime.getURL(PRIVACY_POLICY_PATH);
+    const done = (tab) => {
+        privacyPolicyCreateGuardInFlight = false;
+        if (typeof callback === 'function') {
+            callback(tab);
+        }
+    };
+
+    if (!nativeTabsQuery) {
+        nativeTabsCreate({ url: finalUrl }, done);
+        return;
+    }
+
+    nativeTabsQuery({ url: finalUrl }, (tabs) => {
+        if (!chrome.runtime.lastError && Array.isArray(tabs) && tabs[0] && typeof tabs[0].id === 'number') {
+            const tab = tabs[0];
+            if (nativeTabsUpdate) {
+                nativeTabsUpdate(tab.id, { active: true }, () => {});
+            }
+            if (nativeWindowsUpdate && typeof tab.windowId === 'number') {
+                nativeWindowsUpdate(tab.windowId, { focused: true }, () => {});
+            }
+            done(tab);
+            return;
+        }
+        nativeTabsCreate({ url: finalUrl }, done);
+    });
+}
+
+installPrivacyPolicyTabsGuard();
 importScripts('background.js');
 
 const PARAMEXT_SETTINGS_KEY = 'paramExtPlatformSettingsV2';

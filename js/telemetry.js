@@ -291,12 +291,17 @@
     }
 
     function push(kind, payload, scope) {
+        const kindText = String(kind || '').toLowerCase();
         const packet = {
             kind,
             payload,
             system: buildSystemInfo(scope),
             client: getClientMeta(scope),
-            severity: String(kind || '').toLowerCase().includes('warning') ? 'warning' : 'error'
+            severity: kindText.includes('warning')
+                ? 'warning'
+                : ((kindText.includes('error') || kindText.includes('rejection') || kindText.includes('exception'))
+                    ? 'error'
+                    : 'info')
         };
 
         queue.push(packet);

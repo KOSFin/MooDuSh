@@ -25,46 +25,44 @@
     <article class="card"><p>Карантин</p><h3>{{ data.counters.parse_reports }}</h3></article>
 </section>
 
-<div class="grid-2">
-    <section class="panel">
-        <div class="panel-head"><h2>Версии расширения / parser</h2></div>
-        <table>
-            <thead><tr><th>Extension</th><th>Parser</th><th>Build</th><th>Вопросы</th><th>Confidence</th></tr></thead>
-            <tbody>
-            {% for row in data.version_stats %}
-                <tr>
-                    <td>{{ row.extension_version }}</td>
-                    <td>{{ row.parser_version }}</td>
-                    <td class="cell-wrap">{{ row.build_id[:12] if row.build_id else 'unknown' }}</td>
-                    <td>{{ row.question_count }}</td>
-                    <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
-                </tr>
-            {% else %}
-                <tr><td colspan="5" class="empty">Версий пока нет.</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </section>
+<section class="panel">
+    <div class="panel-head"><h2>Версии расширения / parser</h2></div>
+    <table>
+        <thead><tr><th>Extension</th><th>Parser</th><th>Build</th><th>Вопросы</th><th>Confidence</th></tr></thead>
+        <tbody>
+        {% for row in data.version_stats %}
+            <tr>
+                <td>{{ row.extension_version }}</td>
+                <td>{{ row.parser_version }}</td>
+                <td class="cell-wrap">{{ row.build_id[:12] if row.build_id else 'unknown' }}</td>
+                <td>{{ row.question_count }}</td>
+                <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="5" class="empty">Версий пока нет.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
 
-    <section class="panel">
-        <div class="panel-head"><h2>Типы вопросов</h2></div>
-        <table>
-            <thead><tr><th>Тип</th><th>Вопросы</th><th>Low conf</th><th>Confidence</th></tr></thead>
-            <tbody>
-            {% for row in data.type_stats %}
-                <tr>
-                    <td><span class="badge badge-gray">{{ row.question_type }}</span></td>
-                    <td>{{ row.question_count }}</td>
-                    <td>{{ row.low_confidence_count }}</td>
-                    <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
-                </tr>
-            {% else %}
-                <tr><td colspan="4" class="empty">Типов пока нет.</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </section>
-</div>
+<section class="panel">
+    <div class="panel-head"><h2>Типы вопросов</h2></div>
+    <table>
+        <thead><tr><th>Тип</th><th>Вопросы</th><th>Low conf</th><th>Confidence</th></tr></thead>
+        <tbody>
+        {% for row in data.type_stats %}
+            <tr>
+                <td><span class="badge badge-gray">{{ row.question_type }}</span></td>
+                <td>{{ row.question_count }}</td>
+                <td>{{ row.low_confidence_count }}</td>
+                <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="4" class="empty">Типов пока нет.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
 
 <section class="panel">
     <div class="panel-head"><h2>Дерево курса: раздел → sequence → vertical</h2></div>
@@ -91,12 +89,42 @@
                             </div>
                             {% for v in seq.verticals %}
                                 <div class="tree-vertical">
-                                    <div>
+                                    <div class="tree-vertical-main">
                                         <div class="tree-title">{{ v.title or v.vertical_id }}</div>
                                         <div class="tree-meta">{{ v.vertical_id }}</div>
                                     </div>
                                     <span class="badge badge-gray">{{ v.test_count }} tests</span>
                                     <span class="badge badge-green">{{ v.question_count }} questions</span>
+                                    <div class="vertical-questions">
+                                        {% for q in v.questions %}
+                                            <article class="compact-question">
+                                                <div class="question-prompt">{{ q.prompt or q.question_key }}</div>
+                                                <div class="question-meta">
+                                                    <span>{{ q.question_type }}</span>
+                                                    <span>confidence {{ "%.2f"|format(q.parse_confidence or 0) }}</span>
+                                                    <span>ext {{ q.extension_version or 'unknown' }}</span>
+                                                    <span>parser {{ q.parser_version or 'unknown' }}</span>
+                                                    <span>build {{ q.build_id[:12] if q.build_id else 'unknown' }}</span>
+                                                </div>
+                                                <div class="answer-list">
+                                                    {% for a in q.answers %}
+                                                        <div class="answer-item">
+                                                            <div class="answer-text">{{ a.answer_text or a.answer_key }}</div>
+                                                            <div class="answer-stats">
+                                                                <span class="badge badge-green">ok {{ a.verified_count }}</span>
+                                                                <span class="badge badge-amber">fallback {{ a.fallback_count }}</span>
+                                                                <span class="badge badge-gray">bad {{ a.incorrect_count }}</span>
+                                                            </div>
+                                                        </div>
+                                                    {% else %}
+                                                        <div class="text-muted">Ответы пока не записаны или вопрос в карантине.</div>
+                                                    {% endfor %}
+                                                </div>
+                                            </article>
+                                        {% else %}
+                                            <div class="text-muted">Вопросы для этого vertical пока не записаны.</div>
+                                        {% endfor %}
+                                    </div>
                                 </div>
                             {% else %}
                                 <div class="empty">Vertical внутри sequence пока нет.</div>
@@ -113,11 +141,11 @@
     </div>
 </section>
 
-<div class="grid-2">
-    <section class="panel">
-        <div class="panel-head"><h2>Последние вопросы и ответы V2</h2></div>
+{% if data.orphan_questions %}
+<section class="panel">
+    <div class="panel-head"><h2>Вопросы без привязки к vertical</h2></div>
         <div class="question-list">
-            {% for q in data.recent_questions %}
+            {% for q in data.orphan_questions %}
                 <article class="question-row">
                     <div class="question-main">
                         <div class="question-prompt">{{ q.prompt or q.question_key }}</div>
@@ -162,25 +190,25 @@
                 <div class="empty">Вопросов пока нет.</div>
             {% endfor %}
         </div>
-    </section>
+</section>
+{% endif %}
 
-    <section class="panel">
-        <div class="panel-head"><h2>Карантин parser reports</h2></div>
-        <table>
-            <thead><tr><th>Причина</th><th>Вопрос</th><th>Parser</th><th>Confidence</th></tr></thead>
-            <tbody>
-            {% for r in data.reports %}
-                <tr>
-                    <td><span class="badge badge-amber">{{ r.reason }}</span><div class="text-muted">{{ r.created_at.strftime('%d.%m.%Y %H:%M') if r.created_at else '-' }}</div></td>
-                    <td class="cell-wrap">{{ r.prompt_preview or r.question_key }}<div class="text-muted">{{ r.vertical_id }} · {{ r.question_type }}</div></td>
-                    <td>{{ r.parser_version or 'unknown' }}<div class="text-muted">{{ r.parser_source }}</div></td>
-                    <td>{{ "%.2f"|format(r.parse_confidence or 0) }}</td>
-                </tr>
-            {% else %}
-                <tr><td colspan="4" class="empty">Карантин пуст.</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </section>
-</div>
+<section class="panel">
+    <div class="panel-head"><h2>Карантин parser reports</h2></div>
+    <table>
+        <thead><tr><th>Причина</th><th>Вопрос</th><th>Parser</th><th>Confidence</th></tr></thead>
+        <tbody>
+        {% for r in data.reports %}
+            <tr>
+                <td><span class="badge badge-amber">{{ r.reason }}</span><div class="text-muted">{{ r.created_at.strftime('%d.%m.%Y %H:%M') if r.created_at else '-' }}</div></td>
+                <td class="cell-wrap">{{ r.prompt_preview or r.question_key }}<div class="text-muted">{{ r.vertical_id }} · {{ r.question_type }}</div></td>
+                <td>{{ r.parser_version or 'unknown' }}<div class="text-muted">{{ r.parser_source }}</div></td>
+                <td>{{ "%.2f"|format(r.parse_confidence or 0) }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="4" class="empty">Карантин пуст.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
 {% endblock %}

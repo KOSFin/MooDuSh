@@ -35,7 +35,7 @@
         .card { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 15px; box-shadow: 0 1px 2px rgba(15,23,42,0.04); }
         .card p { margin: 0; font-size: 12px; color: #667085; }
         .card h3 { margin: 7px 0 0; font-size: 24px; letter-spacing: 0; }
-        .grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.42fr); gap: 16px; align-items: start; }
+        .grid-2 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
         .panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
         .panel-head { padding: 13px 15px; border-bottom: 1px solid #edf2f7; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
         .panel-head h2 { margin: 0; font-size: 15px; }
@@ -61,6 +61,9 @@
         .tree-body { display: grid; gap: 8px; padding: 12px; }
         .tree-seq { border-left: 3px solid #2563eb; padding-left: 10px; display: grid; gap: 7px; }
         .tree-vertical { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid #edf2f7; border-radius: 8px; background: #fbfdff; }
+        .tree-vertical-main { min-width: 0; }
+        .vertical-questions { grid-column: 1 / -1; display: grid; gap: 8px; margin-top: 2px; }
+        .compact-question { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 10px; display: grid; gap: 7px; }
         .answer-list { display: grid; gap: 6px; margin-top: 8px; }
         .answer-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fbfdff; }
         .answer-text { overflow-wrap: anywhere; font-size: 13px; }
