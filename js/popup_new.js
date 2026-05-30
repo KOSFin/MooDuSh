@@ -110,7 +110,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!tabId) {
                 return;
             }
-            chrome.tabs.sendMessage(tabId, message, () => {});
+            chrome.tabs.sendMessage(tabId, message, () => {
+                const lastError = chrome.runtime.lastError;
+                if (lastError) {
+                    return;
+                }
+            });
         });
     }
 
