@@ -146,6 +146,10 @@
         'Этот вопрос',
         'MooDuSh OpenEdu',
         'MooDuSh',
+        'Набрано баллов',
+        'Использовано попыток',
+        'Вы использовали',
+        'Разместите ответ здесь',
         'Пока нет ответов.',
         'Ответы'
     ].sort((a, b) => b.length - a.length);
@@ -230,7 +234,10 @@
         }
 
         const cleaned = collapseWhitespace(text);
-        return cleaned || raw;
+        if (!cleaned) {
+            return hadUiArtifact ? '' : raw;
+        }
+        return cleaned;
     }
 
     function sanitizeAnswerText(value) {

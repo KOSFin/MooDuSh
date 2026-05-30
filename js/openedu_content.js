@@ -557,6 +557,65 @@
         return collapseWhitespace(value).toLowerCase();
     }
 
+    function collectPromptMediaTokens(node) {
+        if (!(node instanceof Element)) {
+            return [];
+        }
+
+        const tokens = [];
+        const seen = new Set();
+        node.querySelectorAll('img, svg, canvas, object, embed').forEach((mediaNode) => {
+            if (!(mediaNode instanceof Element)) {
+                return;
+            }
+
+            const tag = mediaNode.tagName.toLowerCase();
+            const label = collapseWhitespace(
+                mediaNode.getAttribute('alt')
+                || mediaNode.getAttribute('title')
+                || mediaNode.getAttribute('aria-label')
+                || ''
+            );
+            const rawSrc = collapseWhitespace(
+                mediaNode.getAttribute('src')
+                || mediaNode.getAttribute('data-src')
+                || mediaNode.getAttribute('href')
+                || mediaNode.getAttribute('xlink:href')
+                || mediaNode.getAttribute('data')
+                || ''
+            );
+
+            let token = label;
+            if (!token && rawSrc) {
+                const cleanSrc = rawSrc.split('#')[0].split('?')[0];
+                const parts = cleanSrc.split('/').filter(Boolean);
+                token = parts[parts.length - 1] || cleanSrc;
+            }
+            if (!token && (tag === 'svg' || tag === 'canvas')) {
+                token = buildMediaNodeSignature(mediaNode) || tag;
+            }
+
+            if (token) {
+                const full = tag + ':' + token;
+                if (!seen.has(full)) {
+                    seen.add(full);
+                    tokens.push(full);
+                }
+            }
+        });
+
+        return tokens;
+    }
+
+    function promptTextOf(node) {
+        const text = textOf(node);
+        const tokens = collectPromptMediaTokens(node);
+        if (!text && tokens.length === 0) {
+            return '';
+        }
+        return collapseWhitespace([text, ...tokens].filter(Boolean).join(' '));
+    }
+
     function sanitizeQuestionPromptText(value, answerTexts) {
         if (typeof openeduShared.sanitizeQuestionPrompt === 'function') {
             return openeduShared.sanitizeQuestionPrompt(value, answerTexts);
@@ -2117,6 +2176,8 @@
         return result;
     }
 
+    const PROMPT_NOISE_RE = /^(?:набран\w*\s+баллов|использован\w*\s+попыток|вы\s+использовали\s+\d+\s*из\s*\d+\s*попыток|разместите\s+ответ\s+здесь|перетащите\s+(?:ответ(?:ы)?|элемент(?:ы)?))\b/i;
+
     function isGenericQuestionInstructionText(value) {
         const text = normalizeText(String(value || '').replace(/[.!?:;…]+$/g, ''));
         if (!text) {
@@ -2131,6 +2192,14 @@
             || /^заполните\s+(?:пропуск|пустое\s+поле)$/i.test(text);
     }
 
+    function isPromptNoiseText(value) {
+        const text = normalizeText(String(value || '').replace(/[.!?:;…]+$/g, ''));
+        if (!text) {
+            return true;
+        }
+        return PROMPT_NOISE_RE.test(text);
+    }
+
     function getFirstPromptCandidate(root, selectorGroups) {
         if (!(root instanceof HTMLElement)) {
             return '';
@@ -2138,7 +2207,7 @@
 
         for (const selector of selectorGroups) {
             if (root.matches(selector)) {
-                const prompt = normalizePromptCandidateText(textOf(root));
+                const prompt = normalizePromptCandidateText(promptTextOf(root));
                 if (prompt) {
                     return prompt;
                 }
@@ -2146,7 +2215,7 @@
 
             const nodes = root.querySelectorAll(selector);
             for (const node of nodes) {
-                const prompt = normalizePromptCandidateText(textOf(node));
+                const prompt = normalizePromptCandidateText(promptTextOf(node));
                 if (prompt) {
                     return prompt;
                 }
@@ -2203,7 +2272,7 @@
 
     function normalizePromptCandidateText(value) {
         const text = normalizePromptLikeText(value);
-        if (!text || isGenericQuestionInstructionText(text)) {
+        if (!text || isGenericQuestionInstructionText(text) || isPromptNoiseText(text)) {
             return '';
         }
         return text;
@@ -2690,12 +2759,12 @@
         while (cursor && cursor !== root) {
             let previous = cursor.previousElementSibling;
             while (previous) {
-                const direct = normalizePromptCandidateText(textOf(previous));
+                const direct = normalizePromptCandidateText(promptTextOf(previous));
                 if (direct && direct.length >= 8) {
                     return direct;
                 }
 
-                const nested = normalizePromptCandidateText(textOf(previous.querySelector('h1, h2, h3, h4, legend, .problem-title, .question-title, .problem-header, p')));
+                const nested = normalizePromptCandidateText(promptTextOf(previous.querySelector('h1, h2, h3, h4, legend, .problem-title, .question-title, .problem-header, p')));
                 if (nested && nested.length >= 8) {
                     return nested;
                 }

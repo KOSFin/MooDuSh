@@ -164,15 +164,35 @@ document.addEventListener('DOMContentLoaded', async () => {
         refs.btnStop.classList.toggle('hidden', !settings.moodle.autoSolving);
     }
 
+    function getOpeneduBackendUiState() {
+        const openeduBackend = settings.backend.openedu || {};
+        const defaultUrl = defaultOpeneduUrl();
+        const moodleDefault = buildConfig.moodleApiBaseUrl || settingsApi.DEFAULT_SETTINGS.backend.moodle.apiBaseUrl;
+        const currentUrl = String(openeduBackend.apiBaseUrl || '').trim();
+        const shouldForceDefault =
+            !settings.onboarding?.completed
+            && !openeduBackend.apiToken
+            && currentUrl
+            && defaultUrl
+            && currentUrl === moodleDefault
+            && defaultUrl !== moodleDefault;
+
+        return {
+            apiBaseUrl: shouldForceDefault ? defaultUrl : (currentUrl || defaultUrl),
+            isCustom: !shouldForceDefault && Boolean(currentUrl && currentUrl !== defaultUrl)
+        };
+    }
+
     function applyStateToUi() {
         const openeduBackend = settings.backend.openedu;
-        refs.backendApiBaseUrl.value = openeduBackend.apiBaseUrl || defaultOpeneduUrl();
+        const uiBackend = getOpeneduBackendUiState();
+        refs.backendApiBaseUrl.value = uiBackend.apiBaseUrl;
         refs.backendApiToken.value = openeduBackend.apiToken || '';
         refs.backendRequestTimeoutMs.value = String(openeduBackend.requestTimeoutMs || 4000);
         refs.openeduBackendVersion.value = settings.openedu.backendVersion || 'v2';
         refs.backendVersionStatus.textContent = String(refs.openeduBackendVersion.value || 'v2').toUpperCase();
-        refs.customBackendToggle.checked = Boolean(openeduBackend.apiBaseUrl && openeduBackend.apiBaseUrl !== defaultOpeneduUrl());
-        refs.customBackendFields.classList.toggle('hidden', !refs.customBackendToggle.checked);
+        refs.customBackendToggle.checked = uiBackend.isCustom;
+        refs.customBackendFields.classList.toggle('hidden', !uiBackend.isCustom);
 
         setRadio('openeduMode', settings.openedu.mode);
         setRadio('moodleMode', settings.moodle.mode);
@@ -368,22 +388,36 @@ document.addEventListener('DOMContentLoaded', async () => {
         applyStateToUi();
     });
     refs.setupContinueBtn.addEventListener('click', async () => {
+        const token = refs.backendApiToken.value.trim();
+        if (!token) {
+            setBackendStatus('Введите ключ', false);
+            return;
+        }
+        const ok = await pingBackend();
+        if (!ok) {
+            return;
+        }
         await save('setup-continue', false);
     });
 
     document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => setTab(tab.dataset.tab)));
     refs.customBackendToggle.addEventListener('change', () => {
+        if (!refs.customBackendToggle.checked) {
+            refs.backendApiBaseUrl.value = defaultOpeneduUrl();
+        }
         refs.customBackendFields.classList.toggle('hidden', !refs.customBackendToggle.checked);
     });
     refs.openeduBackendVersion.addEventListener('change', () => {
         refs.backendVersionStatus.textContent = String(refs.openeduBackendVersion.value || 'v2').toUpperCase();
     });
-    refs.backendPingBtn.addEventListener('click', pingBackend);
+    if (refs.backendPingBtn) {
+        refs.backendPingBtn.addEventListener('click', pingBackend);
+    }
     refs.backendResetUrlBtn.addEventListener('click', () => {
         refs.customBackendToggle.checked = false;
         refs.backendApiBaseUrl.value = defaultOpeneduUrl();
         refs.customBackendFields.classList.add('hidden');
-        setBackendStatus('URL сброшен', null);
+        setBackendStatus('Не проверено', null);
     });
     refs.platformOpenedu.addEventListener('click', () => {
         settings.activePlatform = 'openedu';

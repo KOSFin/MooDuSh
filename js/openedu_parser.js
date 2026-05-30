@@ -3,8 +3,8 @@
     const QUESTION_SELECTOR = '.wrapper-problem-response, .xblock-student_view-multiengine .problem, .xblock-student_view-problem .problem, [data-problem-id], fieldset, .choicegroup, [id^="problem_"]';
     const INPUT_SELECTOR = 'input[type="radio"], input[type="checkbox"], input[type="text"], textarea, select';
     const LABEL_SELECTOR = 'label.response-label, label.field-label, .choicegroup label[for], label[for], label';
-    const SYSTEM_TEXT_RE = /(MooDuSh|Вставить правильн|Вставить популярн|Нет статистики|Проверить|Отправить|Сохранить|Show answer|Ответы в задаче отмечены)/i;
-    const PROMPT_NOISE_RE = /\b(Выберите\s+((один|несколько|все|\d+|правильн)[^.:\n]*)|Дополните|Набрано\s+баллов:\s*\d+\s*из\s*\d+|Вопрос\s+\d+|Show answer|Save|Сохранить|Проверить|Отправить|Ответы в задаче отмечены|None)\b/gi;
+    const SYSTEM_TEXT_RE = /(MooDuSh|Вставить правильн|Вставить популярн|Нет статистики|Проверить|Отправить|Сохранить|Show answer|Ответы в задаче отмечены|Набрано\s+баллов|Использовано\s+попыток|Вы\s+использовали|Разместите\s+ответ\s+здесь)/i;
+    const PROMPT_NOISE_RE = /\b(Выберите\s+((один|несколько|все|\d+|правильн)[^.:\n]*)|Дополните|Набрано\s+баллов:\s*\d+\s*из\s*\d+|Использовано\s+попыток:\s*\d+\s*из\s*\d+|Вы\s+использовали\s+\d+\s*из\s*\d+\s*попыток|Разместите\s+ответ\s+здесь|Вопрос\s+\d+|Show answer|Save|Сохранить|Проверить|Отправить|Ответы в задаче отмечены|None)\b/gi;
 
     const shared = root.ParamExtOpeneduShared || {};
 

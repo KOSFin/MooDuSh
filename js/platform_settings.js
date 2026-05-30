@@ -159,6 +159,20 @@
             next.diagnostics.openeduDebugOverlay = Boolean(source.diagnostics.openeduDebugOverlay);
         }
 
+        const defaultOpeneduUrl = buildConfig.openeduApiBaseUrl || DEFAULT_SETTINGS.backend.openedu.apiBaseUrl;
+        const defaultMoodleUrl = buildConfig.moodleApiBaseUrl || DEFAULT_SETTINGS.backend.moodle.apiBaseUrl;
+        const openeduTokenMissing = !next.backend.openedu.apiToken;
+        const onboardingIncomplete = !next.onboarding.completed;
+        if (
+            onboardingIncomplete
+            && openeduTokenMissing
+            && defaultOpeneduUrl
+            && defaultOpeneduUrl !== defaultMoodleUrl
+            && next.backend.openedu.apiBaseUrl === defaultMoodleUrl
+        ) {
+            next.backend.openedu.apiBaseUrl = defaultOpeneduUrl;
+        }
+
         return next;
     }
 
