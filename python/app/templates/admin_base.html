@@ -51,6 +51,19 @@
         .question-main { min-width: 0; display: grid; gap: 7px; }
         .question-prompt { font-size: 14px; line-height: 1.42; color: #172033; overflow-wrap: anywhere; word-break: normal; }
         .question-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: #667085; font-size: 12px; }
+        .admin-split-label { margin: 12px 8px 2px; color: #9ca3af; font-size: 11px; font-weight: 850; text-transform: uppercase; letter-spacing: 0.04em; }
+        .tree { display: grid; gap: 10px; padding: 14px; }
+        .tree-chapter { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; overflow: hidden; }
+        .tree-chapter-head { padding: 12px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; gap: 12px; }
+        .tree-title { font-weight: 850; overflow-wrap: anywhere; }
+        .tree-meta { color: #667085; font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+        .tree-body { display: grid; gap: 8px; padding: 12px; }
+        .tree-seq { border-left: 3px solid #2563eb; padding-left: 10px; display: grid; gap: 7px; }
+        .tree-vertical { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid #edf2f7; border-radius: 8px; background: #fbfdff; }
+        .answer-list { display: grid; gap: 6px; margin-top: 8px; }
+        .answer-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fbfdff; }
+        .answer-text { overflow-wrap: anywhere; font-size: 13px; }
+        .answer-stats { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
         .question-test { font-weight: 750; text-decoration: none; color: #172033; }
         .question-test:hover { text-decoration: underline; }
         .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(68px, 1fr)); gap: 8px; align-content: start; min-width: 330px; }
@@ -95,9 +108,11 @@
             <nav class="nav" aria-label="Навигация">
                 <a href="/admin" class="{% if active_page == 'overview' %}active{% endif %}">Обзор</a>
                 <a href="/admin/users" class="{% if active_page == 'users' %}active{% endif %}">Пользователи</a>
+                <div class="admin-split-label">Новая OpenEdu V2</div>
                 <a href="/admin/v2/courses" class="{% if active_page == 'v2_courses' %}active{% endif %}">Курсы V2</a>
-                <a href="/admin/tests" class="{% if active_page == 'tests' %}active{% endif %}">Тесты</a>
-                <a href="/admin/questions" class="{% if active_page == 'questions' %}active{% endif %}">Вопросы</a>
+                <div class="admin-split-label">Legacy база</div>
+                <a href="/admin/tests" class="{% if active_page == 'tests' %}active{% endif %}">Тесты legacy</a>
+                <a href="/admin/questions" class="{% if active_page == 'questions' %}active{% endif %}">Вопросы legacy</a>
             </nav>
             <div class="sidebar-footer">
                 <div class="env">Окружение: {{ app_env }}</div>

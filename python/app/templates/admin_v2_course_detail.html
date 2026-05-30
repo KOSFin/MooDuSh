@@ -1,43 +1,114 @@
 {% extends "admin_base.html" %}
-{% block title %}Курс V2{% endblock %}
-{% block page_title %}Курс V2{% endblock %}
+{% block title %}Курс OpenEdu V2{% endblock %}
+{% block page_title %}Курс OpenEdu V2{% endblock %}
 {% block content %}
 <div class="section-head">
-    <h2 class="cell-wrap">{{ data.course.title or data.course.course_id }}</h2>
+    <div>
+        <h2 class="cell-wrap">{{ data.course.title or data.course.course_id }}</h2>
+        <p class="text-muted">{{ data.course.host }} · {{ data.course.course_id }}</p>
+    </div>
     <a class="btn btn-secondary" href="/admin/v2/courses">Назад</a>
 </div>
-<p class="text-muted">{{ data.course.host }} · {{ data.course.course_id }}</p>
 
 <section class="cards">
     <article class="card"><p>Разделы</p><h3>{{ data.counters.chapters }}</h3></article>
     <article class="card"><p>Sequence</p><h3>{{ data.counters.sequentials }}</h3></article>
     <article class="card"><p>Vertical</p><h3>{{ data.counters.verticals }}</h3></article>
-    <article class="card"><p>Вопросы</p><h3>{{ data.counters.questions }}</h3></article>
-    <article class="card"><p>Отчеты парсера</p><h3>{{ data.counters.parse_reports }}</h3></article>
-</section>
-
-<section class="panel">
-    <div class="panel-head"><h2>Структура курса</h2></div>
-    <table>
-        <thead><tr><th>Раздел</th><th>Sequence</th><th>Vertical</th><th>Вопросы</th></tr></thead>
-        <tbody>
-        {% for ch in data.chapters %}
-            <tr>
-                <td class="cell-wrap">{{ ch.title or ch.chapter_id }}<div class="text-muted">{{ ch.chapter_id }}</div></td>
-                <td>{{ ch.sequential_count }}</td>
-                <td>{{ ch.vertical_count }}</td>
-                <td>{{ ch.question_count }}</td>
-            </tr>
-        {% else %}
-            <tr><td colspan="4" class="empty">Разделы пока не записаны.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
+    <article class="card"><p>Вопросы V2</p><h3>{{ data.counters.questions }}</h3></article>
+    <article class="card"><p>Карантин</p><h3>{{ data.counters.parse_reports }}</h3></article>
 </section>
 
 <div class="grid-2">
     <section class="panel">
-        <div class="panel-head"><h2>Последние вопросы</h2></div>
+        <div class="panel-head"><h2>Версии расширения / parser</h2></div>
+        <table>
+            <thead><tr><th>Extension</th><th>Parser</th><th>Build</th><th>Вопросы</th><th>Confidence</th></tr></thead>
+            <tbody>
+            {% for row in data.version_stats %}
+                <tr>
+                    <td>{{ row.extension_version }}</td>
+                    <td>{{ row.parser_version }}</td>
+                    <td class="cell-wrap">{{ row.build_id[:12] if row.build_id else 'unknown' }}</td>
+                    <td>{{ row.question_count }}</td>
+                    <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" class="empty">Версий пока нет.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head"><h2>Типы вопросов</h2></div>
+        <table>
+            <thead><tr><th>Тип</th><th>Вопросы</th><th>Low conf</th><th>Confidence</th></tr></thead>
+            <tbody>
+            {% for row in data.type_stats %}
+                <tr>
+                    <td><span class="badge badge-gray">{{ row.question_type }}</span></td>
+                    <td>{{ row.question_count }}</td>
+                    <td>{{ row.low_confidence_count }}</td>
+                    <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="4" class="empty">Типов пока нет.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+
+<section class="panel">
+    <div class="panel-head"><h2>Дерево курса: раздел → sequence → vertical</h2></div>
+    <div class="tree">
+        {% for ch in data.chapters %}
+            <article class="tree-chapter">
+                <div class="tree-chapter-head">
+                    <div>
+                        <div class="tree-title">{{ ch.title or ch.chapter_id }}</div>
+                        <div class="tree-meta">{{ ch.chapter_id }}</div>
+                    </div>
+                    <div class="answer-stats">
+                        <span class="badge badge-gray">{{ ch.sequential_count }} seq</span>
+                        <span class="badge badge-gray">{{ ch.vertical_count }} vertical</span>
+                        <span class="badge badge-green">{{ ch.question_count }} questions</span>
+                    </div>
+                </div>
+                <div class="tree-body">
+                    {% for seq in ch.sequentials %}
+                        <div class="tree-seq">
+                            <div>
+                                <div class="tree-title">{{ seq.title or seq.sequential_id }}</div>
+                                <div class="tree-meta">{{ seq.sequential_id }}</div>
+                            </div>
+                            {% for v in seq.verticals %}
+                                <div class="tree-vertical">
+                                    <div>
+                                        <div class="tree-title">{{ v.title or v.vertical_id }}</div>
+                                        <div class="tree-meta">{{ v.vertical_id }}</div>
+                                    </div>
+                                    <span class="badge badge-gray">{{ v.test_count }} tests</span>
+                                    <span class="badge badge-green">{{ v.question_count }} questions</span>
+                                </div>
+                            {% else %}
+                                <div class="empty">Vertical внутри sequence пока нет.</div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="empty">Sequence внутри раздела пока нет.</div>
+                    {% endfor %}
+                </div>
+            </article>
+        {% else %}
+            <div class="empty">Структура курса пока не записана.</div>
+        {% endfor %}
+    </div>
+</section>
+
+<div class="grid-2">
+    <section class="panel">
+        <div class="panel-head"><h2>Последние вопросы и ответы V2</h2></div>
         <div class="question-list">
             {% for q in data.recent_questions %}
                 <article class="question-row">
@@ -46,11 +117,31 @@
                         <div class="question-meta">
                             <span>{{ q.question_type }}</span>
                             <span>confidence {{ "%.2f"|format(q.parse_confidence or 0) }}</span>
+                            <span>ext {{ q.extension_version or 'unknown' }}</span>
+                            <span>parser {{ q.parser_version or 'unknown' }}</span>
+                            <span>build {{ q.build_id[:12] if q.build_id else 'unknown' }}</span>
                             <span>{{ q.vertical_id }}</span>
+                        </div>
+                        <div class="answer-list">
+                            {% for a in q.answers %}
+                                <div class="answer-item">
+                                    <div class="answer-text">{{ a.answer_text or a.answer_key }}</div>
+                                    <div class="answer-stats">
+                                        <span class="badge badge-green">ok {{ a.verified_count }}</span>
+                                        <span class="badge badge-amber">fallback {{ a.fallback_count }}</span>
+                                        <span class="badge badge-gray">bad {{ a.incorrect_count }}</span>
+                                    </div>
+                                </div>
+                            {% else %}
+                                <div class="text-muted">Ответы пока не записаны или вопрос в карантине.</div>
+                            {% endfor %}
                         </div>
                     </div>
                     <div class="metric-grid">
-                        <div class="metric"><span>Завершений</span><strong>{{ q.completed_count }}</strong></div>
+                        <div class="metric"><span>Ответов</span><strong>{{ q.answer_count }}</strong></div>
+                        <div class="metric"><span>Верно</span><strong>{{ q.verified_count }}</strong></div>
+                        <div class="metric"><span>Fallback</span><strong>{{ q.fallback_count }}</strong></div>
+                        <div class="metric"><span>Bad</span><strong>{{ q.incorrect_count }}</strong></div>
                     </div>
                 </article>
             {% else %}
@@ -60,40 +151,22 @@
     </section>
 
     <section class="panel">
-        <div class="panel-head"><h2>Карантин парсера</h2></div>
+        <div class="panel-head"><h2>Карантин parser reports</h2></div>
         <table>
-            <thead><tr><th>Причина</th><th>Вопрос</th><th>Confidence</th></tr></thead>
+            <thead><tr><th>Причина</th><th>Вопрос</th><th>Parser</th><th>Confidence</th></tr></thead>
             <tbody>
             {% for r in data.reports %}
                 <tr>
                     <td><span class="badge badge-amber">{{ r.reason }}</span><div class="text-muted">{{ r.created_at.strftime('%d.%m.%Y %H:%M') if r.created_at else '-' }}</div></td>
                     <td class="cell-wrap">{{ r.prompt_preview or r.question_key }}<div class="text-muted">{{ r.vertical_id }} · {{ r.question_type }}</div></td>
+                    <td>{{ r.parser_version or 'unknown' }}<div class="text-muted">{{ r.parser_source }}</div></td>
                     <td>{{ "%.2f"|format(r.parse_confidence or 0) }}</td>
                 </tr>
             {% else %}
-                <tr><td colspan="3" class="empty">Карантин пуст.</td></tr>
+                <tr><td colspan="4" class="empty">Карантин пуст.</td></tr>
             {% endfor %}
             </tbody>
         </table>
     </section>
 </div>
-
-<section class="panel">
-    <div class="panel-head"><h2>Vertical / frame</h2></div>
-    <table>
-        <thead><tr><th>Vertical</th><th>Sequence</th><th>Вопросы</th><th>Тесты</th></tr></thead>
-        <tbody>
-        {% for v in data.verticals %}
-            <tr>
-                <td class="cell-wrap">{{ v.title or v.vertical_id }}<div class="text-muted">{{ v.vertical_id }}</div></td>
-                <td class="cell-wrap">{{ v.sequential_id }}</td>
-                <td>{{ v.question_count }}</td>
-                <td>{{ v.test_count }}</td>
-            </tr>
-        {% else %}
-            <tr><td colspan="4" class="empty">Vertical пока нет.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-</section>
 {% endblock %}

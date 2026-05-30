@@ -721,7 +721,7 @@ class Database:
                     OR length(q.prompt) > 240
                   )
                 GROUP BY q.test_key, q.question_key, q.prompt
-                ORDER BY q.updated_at DESC
+                ORDER BY updated_at DESC
                 LIMIT $1
                 """,
                 limit,
@@ -2549,17 +2549,78 @@ class Database:
             )
             recent_questions = await conn.fetch(
                 """
-                SELECT question_key, prompt, question_type, parse_confidence, vertical_id, updated_at, completed_count
+                SELECT q.test_key, q.question_key, q.prompt, q.question_type, q.question_fingerprint,
+                       q.extension_version, q.build_id, q.parser_version, q.parser_source,
+                       q.parse_confidence, q.chapter_id, q.sequential_id, q.vertical_id,
+                       q.updated_at, q.completed_count,
+                       COUNT(a.answer_key) AS answer_count,
+                       COALESCE(SUM(a.verified_count), 0) AS verified_count,
+                       COALESCE(SUM(a.incorrect_count), 0) AS incorrect_count,
+                       COALESCE(SUM(a.fallback_count), 0) AS fallback_count
+                FROM openedu_v2_questions q
+                LEFT JOIN openedu_v2_answers a ON a.test_key = q.test_key AND a.question_key = q.question_key
+                WHERE q.course_id = $1
+                GROUP BY q.test_key, q.question_key, q.prompt, q.question_type, q.question_fingerprint,
+                         q.extension_version, q.build_id, q.parser_version, q.parser_source,
+                         q.parse_confidence, q.chapter_id, q.sequential_id, q.vertical_id,
+                         q.updated_at, q.completed_count
+                ORDER BY q.updated_at DESC
+                LIMIT 50
+                """,
+                course_id,
+            )
+            recent_answer_rows = await conn.fetch(
+                """
+                WITH recent AS (
+                    SELECT test_key, question_key
+                    FROM openedu_v2_questions
+                    WHERE course_id = $1
+                    ORDER BY updated_at DESC
+                    LIMIT 50
+                )
+                SELECT a.test_key, a.question_key, a.answer_key, a.answer_text,
+                       a.extension_version, a.build_id, a.parser_version,
+                       a.verified_count, a.incorrect_count, a.fallback_count, a.updated_at
+                FROM openedu_v2_answers a
+                JOIN recent r ON r.test_key = a.test_key AND r.question_key = a.question_key
+                ORDER BY a.verified_count DESC, a.fallback_count DESC, a.updated_at DESC
+                """,
+                course_id,
+            )
+            version_stats = await conn.fetch(
+                """
+                SELECT COALESCE(NULLIF(extension_version, ''), 'unknown') AS extension_version,
+                       COALESCE(NULLIF(parser_version, ''), 'unknown') AS parser_version,
+                       COALESCE(NULLIF(build_id, ''), 'unknown') AS build_id,
+                       COUNT(*) AS question_count,
+                       AVG(parse_confidence) AS avg_confidence
                 FROM openedu_v2_questions
                 WHERE course_id = $1
-                ORDER BY updated_at DESC
-                LIMIT 50
+                GROUP BY COALESCE(NULLIF(extension_version, ''), 'unknown'),
+                         COALESCE(NULLIF(parser_version, ''), 'unknown'),
+                         COALESCE(NULLIF(build_id, ''), 'unknown')
+                ORDER BY question_count DESC, extension_version DESC
+                LIMIT 30
+                """,
+                course_id,
+            )
+            type_stats = await conn.fetch(
+                """
+                SELECT question_type,
+                       COUNT(*) AS question_count,
+                       AVG(parse_confidence) AS avg_confidence,
+                       SUM(CASE WHEN parse_confidence < 0.45 THEN 1 ELSE 0 END) AS low_confidence_count
+                FROM openedu_v2_questions
+                WHERE course_id = $1
+                GROUP BY question_type
+                ORDER BY question_count DESC, question_type
                 """,
                 course_id,
             )
             reports = await conn.fetch(
                 """
-                SELECT id, question_key, vertical_id, reason, prompt_preview, question_type, parse_confidence, created_at
+                SELECT id, question_key, vertical_id, reason, prompt_preview, question_type,
+                       parser_version, parser_source, parse_confidence, created_at
                 FROM openedu_v2_parse_reports
                 WHERE course_id = $1
                 ORDER BY created_at DESC
@@ -2567,13 +2628,41 @@ class Database:
                 """,
                 course_id,
             )
+        answers_by_question: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for row in recent_answer_rows:
+            item = dict(row)
+            answers_by_question.setdefault((item['test_key'], item['question_key']), []).append(item)
+
+        recent_question_items: list[dict[str, Any]] = []
+        for row in recent_questions:
+            item = dict(row)
+            item['answers'] = answers_by_question.get((item['test_key'], item['question_key']), [])[:8]
+            recent_question_items.append(item)
+
+        vertical_items = [dict(r) for r in verticals]
+        verticals_by_seq: dict[str, list[dict[str, Any]]] = {}
+        for item in vertical_items:
+            verticals_by_seq.setdefault(item.get('sequential_id') or '', []).append(item)
+
+        sequential_items = [dict(r) for r in sequentials]
+        sequentials_by_chapter: dict[str, list[dict[str, Any]]] = {}
+        for item in sequential_items:
+            item['verticals'] = verticals_by_seq.get(item.get('sequential_id') or '', [])
+            sequentials_by_chapter.setdefault(item.get('chapter_id') or '', []).append(item)
+
+        chapter_items = [dict(r) for r in chapters]
+        for item in chapter_items:
+            item['sequentials'] = sequentials_by_chapter.get(item.get('chapter_id') or '', [])
+
         return {
             'course': dict(course),
             'counters': dict(counters or {}),
-            'chapters': [dict(r) for r in chapters],
-            'sequentials': [dict(r) for r in sequentials],
-            'verticals': [dict(r) for r in verticals],
-            'recent_questions': [dict(r) for r in recent_questions],
+            'chapters': chapter_items,
+            'sequentials': sequential_items,
+            'verticals': vertical_items,
+            'recent_questions': recent_question_items,
+            'version_stats': [dict(r) for r in version_stats],
+            'type_stats': [dict(r) for r in type_stats],
             'reports': [dict(r) for r in reports],
         }
 

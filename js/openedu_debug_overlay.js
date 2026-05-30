@@ -15,6 +15,27 @@
             [${ATTR}="answer-correct"] { outline: 3px solid rgba(22, 163, 74, .95) !important; outline-offset: 1px !important; }
             [${ATTR}="answer-incorrect"] { outline: 3px solid rgba(220, 38, 38, .9) !important; outline-offset: 1px !important; }
             [${ATTR}="control"] { outline: 2px dashed rgba(245, 158, 11, .85) !important; outline-offset: 2px !important; }
+            [${ATTR}="answer-correct"],
+            [${ATTR}="answer-incorrect"],
+            [${ATTR}="answer"],
+            [${ATTR}="control"],
+            [${ATTR}="prompt"] { position: relative !important; }
+            [${ATTR}="answer-correct"]::after,
+            [${ATTR}="answer-incorrect"]::after,
+            [${ATTR}="control"]::after {
+                position: absolute;
+                right: 4px;
+                top: 2px;
+                z-index: 2147483000;
+                padding: 1px 5px;
+                border-radius: 4px;
+                color: #fff;
+                font: 10px/1.3 system-ui, sans-serif;
+                pointer-events: none;
+            }
+            [${ATTR}="answer-correct"]::after { content: "correct"; background: rgba(22, 101, 52, .92); }
+            [${ATTR}="answer-incorrect"]::after { content: "wrong"; background: rgba(153, 27, 27, .92); }
+            [${ATTR}="control"]::after { content: "control"; background: rgba(146, 64, 14, .92); }
             .moodush-openedu-debug-label {
                 position: absolute;
                 z-index: 2147483000;
@@ -69,6 +90,31 @@
         doc.body.appendChild(label);
     }
 
+    function questionStateText(question) {
+        const options = Array.isArray(question?.options) ? question.options : [];
+        const selected = options.filter((option) => option.selected).length;
+        const correct = options.filter((option) => option.correct).length;
+        const incorrect = options.filter((option) => option.incorrect).length;
+        const verified = Boolean(question?.hasVerifiedAnswer || correct > 0 || incorrect > 0);
+        const parts = [];
+        parts.push(verified ? 'checked' : 'not checked');
+        if (question?.correct) {
+            parts.push('correct');
+        } else if (verified) {
+            parts.push('not correct');
+        }
+        if (selected > 0) {
+            parts.push('selected ' + selected);
+        }
+        if (correct > 0) {
+            parts.push('ok ' + correct);
+        }
+        if (incorrect > 0) {
+            parts.push('bad ' + incorrect);
+        }
+        return parts.join(' · ');
+    }
+
     function render(questions, enabled) {
         const list = Array.isArray(questions) ? questions : [];
         clear(document);
@@ -107,7 +153,7 @@
                     node.setAttribute(ATTR, 'control');
                 }
             });
-            labelFor(rootNode, `${question.questionType || 'question'} · ${question.parseConfidence ?? '?'} · ${question.questionKey || ''}`);
+            labelFor(rootNode, `${question.questionType || 'question'} · ${question.parseConfidence ?? '?'} · ${questionStateText(question)} · ${question.questionKey || ''}`);
         });
     }
 

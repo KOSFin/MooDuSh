@@ -1556,7 +1556,8 @@
             ? element
             : element.closest('table.drag-table, table.answerPlaceStudent');
         const anchor = table instanceof HTMLElement ? table : element;
-        const container = anchor.closest('.problem, .xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert');
+        const container = anchor.closest('.xblock-student_view-problem, [data-problem-id], .problems-wrapper')
+            || anchor.closest('.problem, .vert');
         if (container instanceof HTMLElement && container.querySelector('table.drag-table, table.answerPlaceStudent .dragAnswer, .dragAnswer')) {
             return container;
         }
@@ -1939,7 +1940,9 @@
             return null;
         }
 
-        const container = table.closest('.problem, .xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert') || root;
+        const container = table.closest('.xblock-student_view-problem, [data-problem-id], .problems-wrapper')
+            || table.closest('.problem, .vert')
+            || root;
         if (!(container instanceof HTMLElement)) {
             return null;
         }
