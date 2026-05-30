@@ -196,9 +196,9 @@
                     node.setAttribute(ATTR, 'answer');
                 }
             });
-            scope.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], .submit, .check, .save').forEach((node) => {
+            scope.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], .submit, .check').forEach((node) => {
                 const text = controlText(node);
-                if (/провер|check|отправ|submit|save|сохран/.test(text)) {
+                if (/провер|check|отправ|submit/.test(text)) {
                     node.setAttribute(ATTR, 'control');
                 }
             });

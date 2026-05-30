@@ -145,3 +145,16 @@ test('OpenEdu V2 parser ignores CSS when choosing a drag prompt', () => {
     assert.equal(drag.prompt, 'Установите соответствие между философами и воззрениями.');
     assert.doesNotMatch(drag.prompt, /answerPlaceStudent|!important|border:\s*1px|#allAnswers/i);
 });
+
+test('OpenEdu V2 parser includes adjacent HTML context for multiengine drag tasks', { skip: !fs.existsSync(path.join(__dirname, '..', 'test-files', 'test16.html')) }, () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'test-files', 'test16.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://apps.openedu.ru/' });
+    const questions = parser.parseDocumentTree(dom.window.document, { sourceUrl: 'test16.html' });
+    const dragQuestions = questions.filter((question) => question.questionType === 'drag_order');
+
+    assert.equal(dragQuestions.length, 2);
+    assert.match(dragQuestions[0].prompt, /параллельными прямыми/);
+    assert.match(dragQuestions[0].prompt, /t3\.5\.png/);
+    assert.match(dragQuestions[1].prompt, /triangle|АВС|ABC/);
+    assert.match(dragQuestions[1].prompt, /t3\.6\.png/);
+});

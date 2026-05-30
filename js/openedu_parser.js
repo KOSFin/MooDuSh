@@ -131,6 +131,35 @@
         return '';
     }
 
+    function adjacentHtmlContextPrompt(root) {
+        const currentVert = root.closest?.('.vert');
+        if (!currentVert) {
+            return '';
+        }
+
+        let previous = currentVert.previousElementSibling;
+        for (let i = 0; previous && i < 6; i += 1, previous = previous.previousElementSibling) {
+            if (!previous.matches?.('.vert')) {
+                continue;
+            }
+            if (previous.querySelector(INPUT_SELECTOR + ', table.drag-table, table.answerPlaceStudent, .dragAnswer[id]')) {
+                break;
+            }
+            if (!previous.querySelector('.xblock-student_view-html, [data-block-type="html"], img, svg, canvas')) {
+                continue;
+            }
+
+            const text = cleanPromptText(textOf(previous));
+            const media = mediaToken(previous);
+            const candidate = collapseWhitespace([text, media].filter(Boolean).join(' '));
+            if (candidate && !SYSTEM_TEXT_RE.test(candidate)) {
+                return candidate;
+            }
+        }
+
+        return '';
+    }
+
     function deriveAnswerText(input, root) {
         const inputType = String(input.type || input.tagName || '').toLowerCase();
         if (inputType === 'text' || input.tagName.toLowerCase() === 'textarea') {
@@ -239,10 +268,11 @@
         const container = root.closest?.('.xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert') || root;
         const header = container.querySelector?.('.problem-header, .problem-title, .question-title, h2, h3, h4, legend');
         const headerText = cleanPromptText(textOf(header));
+        const contextText = adjacentHtmlContextPrompt(root);
         if (headerText && !SYSTEM_TEXT_RE.test(headerText)) {
-            return sanitizePrompt(headerText, answerTexts);
+            return sanitizePrompt(collapseWhitespace([contextText, headerText].filter(Boolean).join(' ')), answerTexts);
         }
-        return sanitizePrompt(nearbyPrompt(root), answerTexts);
+        return sanitizePrompt(contextText || nearbyPrompt(root), answerTexts);
     }
 
     function parseEmbeddedDocuments(doc) {

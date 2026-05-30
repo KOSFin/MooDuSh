@@ -13,6 +13,9 @@ self.addEventListener('unhandledrejection', (event) => {
 importScripts('background.js');
 
 const PARAMEXT_SETTINGS_KEY = 'paramExtPlatformSettingsV2';
+const PARAMEXT_LEGACY_SETTINGS_KEY = 'paramExtSettings';
+const PARAMEXT_OLD_SETTINGS_KEY = 'settings';
+let privacyPolicyOpenInFlight = false;
 
 function getLocalStorage(keys) {
     return new Promise((resolve) => {
@@ -20,22 +23,81 @@ function getLocalStorage(keys) {
     });
 }
 
-function openPrivacyPolicyTab() {
-    chrome.tabs.create({
-        url: chrome.runtime.getURL('/html/privacy_policy/index.html')
+function queryPrivacyPolicyTabs(url) {
+    return new Promise((resolve) => {
+        if (!chrome.tabs || typeof chrome.tabs.query !== 'function') {
+            resolve([]);
+            return;
+        }
+        chrome.tabs.query({ url }, (tabs) => {
+            if (chrome.runtime.lastError) {
+                resolve([]);
+                return;
+            }
+            resolve(Array.isArray(tabs) ? tabs : []);
+        });
     });
 }
 
-async function ensurePrivacyPolicyTab() {
-    const payload = await getLocalStorage(PARAMEXT_SETTINGS_KEY);
-    const accepted = Boolean(payload?.[PARAMEXT_SETTINGS_KEY]?.onboarding?.privacyAccepted);
+async function openPrivacyPolicyTab() {
+    if (privacyPolicyOpenInFlight) {
+        return;
+    }
+    privacyPolicyOpenInFlight = true;
+    const url = chrome.runtime.getURL('/html/privacy_policy/index.html');
+    const existing = await queryPrivacyPolicyTabs(url);
+    const tab = existing[0];
+    if (tab && typeof tab.id === 'number') {
+        chrome.tabs.update(tab.id, { active: true }, () => {});
+        if (typeof tab.windowId === 'number') {
+            chrome.windows?.update?.(tab.windowId, { focused: true }, () => {});
+        }
+    } else {
+        chrome.tabs.create({ url });
+    }
+    setTimeout(() => {
+        privacyPolicyOpenInFlight = false;
+    }, 2000);
+}
+
+async function seedOldPrivacySettings() {
+    const payload = await getLocalStorage([PARAMEXT_SETTINGS_KEY, PARAMEXT_LEGACY_SETTINGS_KEY, PARAMEXT_OLD_SETTINGS_KEY]);
+    const accepted = Boolean(
+        payload?.[PARAMEXT_SETTINGS_KEY]?.onboarding?.privacyAccepted
+        || payload?.[PARAMEXT_LEGACY_SETTINGS_KEY]?.privacyPolicyAcceptedByUser
+        || payload?.[PARAMEXT_OLD_SETTINGS_KEY]?.privacyPolicyAcceptedByUser
+    );
     if (!accepted) {
-        openPrivacyPolicyTab();
+        return false;
+    }
+    const oldSettings = Object.assign({}, payload[PARAMEXT_OLD_SETTINGS_KEY] || {}, {
+        privacyPolicyAcceptedByUser: true
+    });
+    chrome.storage.local.set({ [PARAMEXT_OLD_SETTINGS_KEY]: oldSettings }, () => {});
+    return true;
+}
+
+async function ensurePrivacyPolicyTab() {
+    const payload = await getLocalStorage([PARAMEXT_SETTINGS_KEY, PARAMEXT_LEGACY_SETTINGS_KEY, PARAMEXT_OLD_SETTINGS_KEY]);
+    const accepted = Boolean(
+        payload?.[PARAMEXT_SETTINGS_KEY]?.onboarding?.privacyAccepted
+        || payload?.[PARAMEXT_LEGACY_SETTINGS_KEY]?.privacyPolicyAcceptedByUser
+        || payload?.[PARAMEXT_OLD_SETTINGS_KEY]?.privacyPolicyAcceptedByUser
+    );
+    if (!accepted) {
+        await openPrivacyPolicyTab();
     }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-    ensurePrivacyPolicyTab().catch(() => {});
+    seedOldPrivacySettings()
+        .then((accepted) => {
+            if (!accepted) {
+                return ensurePrivacyPolicyTab();
+            }
+            return null;
+        })
+        .catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {

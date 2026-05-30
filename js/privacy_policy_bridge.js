@@ -1,6 +1,7 @@
 (function () {
     const V2_KEY = 'paramExtPlatformSettingsV2';
     const LEGACY_KEY = 'paramExtSettings';
+    const OLD_SETTINGS_KEY = 'settings';
 
     function storageGet(keys) {
         return new Promise((resolve) => {
@@ -19,7 +20,7 @@
             activePlatform: 'openedu',
             backend: {
                 moodle: { apiBaseUrl: 'https://syncshare.naloaty.me/api', apiToken: '', requestTimeoutMs: 4000 },
-                openedu: { apiBaseUrl: 'https://syncshare.naloaty.me/api', apiToken: '', requestTimeoutMs: 4000 }
+                openedu: { apiBaseUrl: 'https://paramext.ruka.me/api', apiToken: '', requestTimeoutMs: 4000 }
             },
             onboarding: {
                 privacyAccepted: false,
@@ -55,7 +56,7 @@
     }
 
     async function markAccepted() {
-        const payload = await storageGet([V2_KEY, LEGACY_KEY]);
+        const payload = await storageGet([V2_KEY, LEGACY_KEY, OLD_SETTINGS_KEY]);
         const settings = Object.assign(defaultSettings(), payload[V2_KEY] || {});
         settings.onboarding = Object.assign(defaultSettings().onboarding, settings.onboarding || {}, {
             privacyAccepted: true,
@@ -67,18 +68,68 @@
             privacyPolicyAcceptedByUser: true,
             allowTechnicalDataCollection: settings.onboarding.allowTechnicalDataCollection
         });
+        const oldSettings = Object.assign({}, payload[OLD_SETTINGS_KEY] || {}, {
+            privacyPolicyAcceptedByUser: true,
+            allowTechnicalDataCollection: settings.onboarding.allowTechnicalDataCollection
+        });
 
         await storageSet({
             [V2_KEY]: settings,
-            [LEGACY_KEY]: legacy
+            [LEGACY_KEY]: legacy,
+            [OLD_SETTINGS_KEY]: oldSettings
         });
     }
 
+    async function loadConsentState() {
+        const payload = await storageGet([V2_KEY, LEGACY_KEY, OLD_SETTINGS_KEY]);
+        const v2 = payload[V2_KEY] || {};
+        const legacy = payload[LEGACY_KEY] || {};
+        const oldSettings = payload[OLD_SETTINGS_KEY] || {};
+        const accepted = Boolean(
+            v2?.onboarding?.privacyAccepted
+            || legacy?.privacyPolicyAcceptedByUser
+            || oldSettings?.privacyPolicyAcceptedByUser
+        );
+        const allowTechnical = v2?.onboarding?.allowTechnicalDataCollection
+            ?? legacy?.allowTechnicalDataCollection
+            ?? oldSettings?.allowTechnicalDataCollection
+            ?? true;
+        return { accepted, allowTechnical: allowTechnical !== false };
+    }
+
+    function decline() {
+        if (chrome.management && typeof chrome.management.uninstallSelf === 'function') {
+            chrome.management.uninstallSelf({ showConfirmDialog: true }, () => {
+                if (chrome.runtime.lastError) {
+                    window.close();
+                }
+            });
+            return;
+        }
+        window.close();
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
+        loadConsentState().then((state) => {
+            const technicalConsent = document.getElementById('technicalConsent');
+            if (technicalConsent) {
+                technicalConsent.checked = state.allowTechnical;
+            }
+            if (state.accepted) {
+                markAccepted().finally(() => window.close());
+            }
+        }).catch(() => {});
+
         document.getElementById('acceptBtn')?.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopImmediatePropagation();
             markAccepted().finally(() => window.close());
+        }, { capture: true });
+
+        document.getElementById('declineBtn')?.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            decline();
         }, { capture: true });
     });
 })();

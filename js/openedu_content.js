@@ -2301,6 +2301,73 @@
         return '';
     }
 
+    function getAdjacentOpeneduContextPrompt(root) {
+        if (!(root instanceof HTMLElement)) {
+            return '';
+        }
+
+        const currentVert = root.closest('.vert');
+        if (!(currentVert instanceof HTMLElement)) {
+            return '';
+        }
+
+        let previous = currentVert.previousElementSibling;
+        for (let i = 0; previous && i < 6; i += 1, previous = previous.previousElementSibling) {
+            if (!(previous instanceof HTMLElement) || !previous.matches('.vert')) {
+                continue;
+            }
+            if (previous.querySelector(QUESTION_INPUT_SELECTOR + ', table.drag-table, table.answerPlaceStudent, .dragAnswer[id]')) {
+                break;
+            }
+            if (!previous.querySelector('.xblock-student_view-html, [data-block-type="html"], img, svg, canvas')) {
+                continue;
+            }
+
+            const prompt = normalizePromptCandidateText(promptTextOf(previous));
+            if (prompt) {
+                return prompt;
+            }
+        }
+
+        return '';
+    }
+
+    function shouldMergeAdjacentOpeneduContext(root, localPrompt) {
+        if (!(root instanceof HTMLElement)) {
+            return false;
+        }
+        if (root.querySelector('table.drag-table, table.answerPlaceStudent, .dragAnswer[id]')) {
+            return true;
+        }
+        const text = normalizeText(localPrompt || '');
+        return /^укажите\s+порядок\b/.test(text)
+            || /^на\s+чертеже\b/.test(text);
+    }
+
+    function mergePromptWithAdjacentContext(root, localPrompt) {
+        const base = normalizePromptCandidateText(localPrompt);
+        if (!base) {
+            return '';
+        }
+
+        const context = shouldMergeAdjacentOpeneduContext(root, base)
+            ? getAdjacentOpeneduContextPrompt(root)
+            : '';
+        if (!context) {
+            return base;
+        }
+
+        const baseNorm = normalizeText(base);
+        const contextNorm = normalizeText(context);
+        if (contextNorm.includes(baseNorm)) {
+            return context;
+        }
+        if (baseNorm.includes(contextNorm)) {
+            return base;
+        }
+        return collapseWhitespace([context, base].join(' '));
+    }
+
     function getQuestionPrompt(root) {
         const localPrompt = getFirstPromptCandidate(root, [
             '.problem-group-label',
@@ -2313,12 +2380,12 @@
             'p'
         ]);
         if (localPrompt) {
-            return localPrompt;
+            return mergePromptWithAdjacentContext(root, localPrompt);
         }
 
         const problemContainer = root.closest('.xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert');
         if (problemContainer instanceof HTMLElement && problemContainer !== root) {
-            return getFirstPromptCandidate(problemContainer, [
+            const containerPrompt = getFirstPromptCandidate(problemContainer, [
                 '.problem-group-label',
                 'legend',
                 '.problem-header',
@@ -2326,6 +2393,7 @@
                 '.question-title',
                 'h2, h3, h4'
             ]);
+            return mergePromptWithAdjacentContext(root, containerPrompt);
         }
 
         return '';
@@ -3552,9 +3620,10 @@
                     .map((option) => sanitizeAnswerText(option.answerText))
                     .filter(Boolean);
                 const nearPrompt = findPromptBeforeNode(root, promptAnchor);
+                const contextualNearPrompt = nearPrompt ? mergePromptWithAdjacentContext(root, nearPrompt) : '';
                 const prompt = sanitizeQuestionPromptText(
                     (getMatchingTableData(groupRoot) ? getMatchingTablePrompt(groupRoot) : '')
-                        || nearPrompt
+                        || contextualNearPrompt
                         || getQuestionPrompt(groupRoot)
                         || fallbackPrompt,
                     promptAnswerTexts,
