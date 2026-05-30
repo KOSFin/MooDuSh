@@ -272,6 +272,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         }, 250);
     }
 
+    function scheduleSetupSave(reason) {
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+        }
+        saveTimer = setTimeout(() => {
+            saveTimer = 0;
+            save(reason, true);
+        }, 250);
+    }
+
     function setBackendStatus(text, ok) {
         refs.backendPingStatus.textContent = text;
         refs.backendCompactStatus.textContent = text;
@@ -290,7 +300,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return false;
         }
         try {
-            const response = await fetch(baseUrl + '/v2/status', {
+            const response = await fetch(baseUrl + endpointPrefix() + '/status', {
                 headers: token ? { Authorization: 'Bearer ' + token } : {},
                 cache: 'no-store'
             });
@@ -406,9 +416,25 @@ document.addEventListener('DOMContentLoaded', async () => {
             refs.backendApiBaseUrl.value = defaultOpeneduUrl();
         }
         refs.customBackendFields.classList.toggle('hidden', !refs.customBackendToggle.checked);
+        if (settings.backend?.openedu?.apiToken) {
+            scheduleSetupSave('backend-toggle');
+        }
     });
     refs.openeduBackendVersion.addEventListener('change', () => {
         refs.backendVersionStatus.textContent = String(refs.openeduBackendVersion.value || 'v2').toUpperCase();
+        if (settings.backend?.openedu?.apiToken) {
+            scheduleSetupSave('backend-version');
+        }
+    });
+    refs.backendApiBaseUrl.addEventListener('input', () => {
+        if (refs.customBackendToggle.checked && settings.backend?.openedu?.apiToken) {
+            scheduleSetupSave('backend-url');
+        }
+    });
+    refs.backendRequestTimeoutMs.addEventListener('input', () => {
+        if (settings.backend?.openedu?.apiToken) {
+            scheduleSetupSave('backend-timeout');
+        }
     });
     if (refs.backendPingBtn) {
         refs.backendPingBtn.addEventListener('click', pingBackend);

@@ -1,6 +1,6 @@
 {
   "name": "moodush-extension",
-  "version": "2.9.0",
+  "version": "2.9.4",
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.js",

@@ -102,7 +102,7 @@ async def legacy_status() -> dict:
 @app.get('/v2/update')
 @app.get('/api/v2/update')
 async def legacy_update(version: str = '', build_id: str = '') -> dict:
-    latest = settings.extension_latest_version or '2.9.0'
+    latest = settings.extension_latest_version or '2.9.4'
     required = settings.extension_required_version or ''
     return {
         'updateRequired': bool(version and version != latest),

@@ -6,7 +6,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Chrome%20Web%20Store-Available-brightgreen?style=flat-square" alt="Chrome Web Store">
   <img src="https://img.shields.io/badge/Manifest%20V3-Compatible-blue?style=flat-square" alt="Manifest Version">
-  <img src="https://img.shields.io/badge/Version-2.9.0-orange?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-2.9.4-orange?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/License-MIT%20with%20Attribution-green?style=flat-square" alt="License">
 </p>
 

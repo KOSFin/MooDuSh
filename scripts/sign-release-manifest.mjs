@@ -10,7 +10,7 @@ const privateKey = process.env.RELEASE_SIGNING_PRIVATE_KEY || '';
 
 const zip = await readFile(zipPath);
 const payload = {
-  version: process.env.EXTENSION_VERSION || process.env.npm_package_version || '2.9.0',
+  version: process.env.EXTENSION_VERSION || process.env.npm_package_version || '2.9.4',
   buildId: process.env.BUILD_ID || process.env.GITHUB_SHA || 'local-dev',
   channel: process.env.BUILD_CHANNEL || 'stable',
   repositoryUrl: process.env.REPOSITORY_URL || '',

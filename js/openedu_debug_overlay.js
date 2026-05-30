@@ -115,6 +115,16 @@
         return parts.join(' · ');
     }
 
+    function promptPreview(question) {
+        const raw = String(question?.prompt || '').replace(/\s+/g, ' ').trim();
+        if (!raw) {
+            return 'prompt: empty';
+        }
+        return raw.length > 120
+            ? ('prompt: ' + raw.slice(0, 117) + '...')
+            : ('prompt: ' + raw);
+    }
+
     function render(questions, enabled) {
         const list = Array.isArray(questions) ? questions : [];
         clear(document);
@@ -153,7 +163,7 @@
                     node.setAttribute(ATTR, 'control');
                 }
             });
-            labelFor(rootNode, `${question.questionType || 'question'} · ${question.parseConfidence ?? '?'} · ${questionStateText(question)} · ${question.questionKey || ''}`);
+            labelFor(rootNode, `${question.questionType || 'question'} · ${question.parseConfidence ?? '?'} · ${questionStateText(question)} · ${promptPreview(question)}`);
         });
     }
 

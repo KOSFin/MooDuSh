@@ -2755,20 +2755,52 @@
             return '';
         }
 
+        const pendingMediaTokens = [];
+        const seenMediaTokens = new Set();
+
+        function rememberMediaTokens(candidate) {
+            if (!(candidate instanceof Element)) {
+                return;
+            }
+            const candidateText = collapseWhitespace(textOf(candidate));
+            if (candidateText) {
+                return;
+            }
+            collectPromptMediaTokens(candidate).forEach((token) => {
+                if (!seenMediaTokens.has(token)) {
+                    seenMediaTokens.add(token);
+                    pendingMediaTokens.push(token);
+                }
+            });
+        }
+
+        function withPendingMedia(prompt) {
+            const base = normalizePromptCandidateText(prompt);
+            if (!base) {
+                return '';
+            }
+            if (pendingMediaTokens.length === 0) {
+                return base;
+            }
+            return collapseWhitespace([base, ...pendingMediaTokens].join(' '));
+        }
+
         let cursor = node;
         while (cursor && cursor !== root) {
             let previous = cursor.previousElementSibling;
             while (previous) {
-                const direct = normalizePromptCandidateText(promptTextOf(previous));
+                const direct = withPendingMedia(promptTextOf(previous));
                 if (direct && direct.length >= 8) {
                     return direct;
                 }
 
-                const nested = normalizePromptCandidateText(promptTextOf(previous.querySelector('h1, h2, h3, h4, legend, .problem-title, .question-title, .problem-header, p')));
+                const nestedPromptNode = previous.querySelector('h1, h2, h3, h4, legend, .problem-title, .question-title, .problem-header, p');
+                const nested = withPendingMedia(promptTextOf(nestedPromptNode));
                 if (nested && nested.length >= 8) {
                     return nested;
                 }
 
+                rememberMediaTokens(previous);
                 previous = previous.previousElementSibling;
             }
             cursor = cursor.parentElement;
@@ -3353,6 +3385,22 @@
         return merged;
     }
 
+    function resetRemoteStatsState(reason) {
+        debugSync('remote_state_reset', {
+            reason: String(reason || 'manual')
+        });
+        lastAttemptPayloadHash = '';
+        lastAttemptPushAt = 0;
+        lastNetworkSyncAt = 0;
+        lastStatsQuerySignature = '';
+        lastStatsQueryAt = 0;
+        lastStatsResponse = null;
+        lastMergedStatsByQuestion = null;
+        lastRenderedQuestions = [];
+        contentFallbackBlockedUntil = 0;
+        contentFallbackBlockedReason = '';
+    }
+
     function getNodeDepth(node) {
         let depth = 0;
         let current = node;
@@ -3421,14 +3469,16 @@
                         groupOptions.length,
                     );
                 }
+                const promptAnchor = getElementByPath(root, first?.inputPath || first?.dragAnswerPath || first?.dragCellPath || '')
+                    || groupRoot;
                 const promptAnswerTexts = groupOptions
                     .map((option) => sanitizeAnswerText(option.answerText))
                     .filter(Boolean);
-                const nearPrompt = findPromptBeforeNode(root, groupRoot);
+                const nearPrompt = findPromptBeforeNode(root, promptAnchor);
                 const prompt = sanitizeQuestionPromptText(
                     (getMatchingTableData(groupRoot) ? getMatchingTablePrompt(groupRoot) : '')
-                        || getQuestionPrompt(groupRoot)
                         || nearPrompt
+                        || getQuestionPrompt(groupRoot)
                         || fallbackPrompt,
                     promptAnswerTexts,
                 );
@@ -7417,7 +7467,15 @@
             }
 
             if (hasSettingsChange) {
+                const previousSettings = settings;
                 settings = await window.ParamExtSettings.getSettings();
+                const backendChanged =
+                    String(previousSettings?.backend?.openedu?.apiBaseUrl || '') !== String(settings?.backend?.openedu?.apiBaseUrl || '')
+                    || String(previousSettings?.backend?.openedu?.apiToken || '') !== String(settings?.backend?.openedu?.apiToken || '')
+                    || String(previousSettings?.openedu?.backendVersion || 'v2') !== String(settings?.openedu?.backendVersion || 'v2');
+                if (backendChanged) {
+                    resetRemoteStatsState('backend_settings_changed');
+                }
                 clearSyncBlock();
                 consecutiveCycleFailures = 0;
                 cyclesStopped = false;
