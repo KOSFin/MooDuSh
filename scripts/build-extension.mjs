@@ -16,6 +16,8 @@ const include = [
   'html',
   'icons',
   'js',
+  'scripts/update.sh',
+  'scripts/update.ps1',
   'logo_main.png',
   '74d85fb11d53487d88e3.png',
   'LICENSE',
