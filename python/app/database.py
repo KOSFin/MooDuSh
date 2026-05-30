@@ -721,7 +721,7 @@ class Database:
                     OR length(q.prompt) > 240
                   )
                 GROUP BY q.test_key, q.question_key, q.prompt
-                ORDER BY updated_at DESC
+                ORDER BY MAX(q.updated_at) DESC
                 LIMIT $1
                 """,
                 limit,
