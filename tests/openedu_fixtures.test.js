@@ -8,7 +8,7 @@ const parser = require('../js/openedu_parser.js');
 const courseApi = require('../js/openedu_course_api.js');
 
 const FIXTURE_DIR = path.join(__dirname, '..', 'test-files');
-const NOISE_RE = /(Выберите\s+((один|несколько|все|\d+|правильн)[^.:\n]*)|Набрано\s+баллов|Сохранить|Show answer|Ответы в задаче отмечены)/i;
+const NOISE_RE = /(Выберите\s+((один|несколько|все|\d+|правильн)[^.:\n]*)|Набрано\s+баллов|Сохранить|Show answer|Ответы в задаче отмечены|answerPlaceStudent|#allAnswers|!important|border:\s*1px|margin-top|pointer-events)/i;
 
 function hasLocalFixtures() {
     return fs.existsSync(FIXTURE_DIR);

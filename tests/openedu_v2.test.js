@@ -60,6 +60,15 @@ test('OpenEdu V2 course map extracts graded vertical hierarchy from HAR blocks p
     assert.ok(graded.every((item) => item.verticalId.includes('type@vertical')));
 });
 
+test('OpenEdu course id can be derived from block ids in xblock URLs', () => {
+    const verticalId = 'block-v1:urfu+PHILOSOPHY+spring_2026+type@vertical+block@68edf4b377694f5086aa4ed3b2a7ad9f';
+    assert.equal(
+        courseApi.findCourseId('https://courses.openedu.ru/xblock/' + encodeURIComponent(verticalId)),
+        'course-v1:urfu+PHILOSOPHY+spring_2026',
+    );
+    assert.equal(courseApi.extractBlockId(encodeURIComponent(verticalId)), verticalId);
+});
+
 test('OpenEdu V2 parser confidence quarantines unknown or empty questions', () => {
     const good = parser.confidenceFor({
         prompt: 'Определение отображенное в мышлении соответствует термину',
@@ -108,4 +117,31 @@ test('OpenEdu V2 parser detects single-cell drag ordering tasks', () => {
     assert.equal(drag.answers.length, 2);
     assert.equal(drag.prompt, 'Укажите порядок построения точки пересечения прямой с плоскостью');
     assert.ok(drag.parseConfidence >= 0.8);
+});
+
+test('OpenEdu V2 parser ignores CSS when choosing a drag prompt', () => {
+    const html = `
+        <div class="xblock-student_view-problem">
+            <div class="problem">
+                <style>
+                    .answerPlaceStudent.cell { border: 1px solid #3a3a3a!important; margin-top: 12px; }
+                    #allAnswers { pointer-events: auto; display: block; }
+                </style>
+                <h2 class="problem-header">Установите соответствие между философами и воззрениями.</h2>
+                <textarea name="answer" hidden class="answer"></textarea>
+                <table class="answerPlaceStudent drag-table"><tbody><tr><td class="cell ui-sortable" id="slot1"></td></tr></tbody></table>
+                <div id="allAnswers" class="answerPlaceStudent">
+                    <div class="dragAnswer" id="a1">Демокрит</div>
+                    <div class="dragAnswer" id="a2">Парменид</div>
+                </div>
+                <button class="submit btn-brand" data-value="Отправить"><span>Отправить</span></button>
+            </div>
+        </div>`;
+    const dom = new JSDOM(html, { url: 'https://apps.openedu.ru/' });
+    const questions = parser.parseDocumentTree(dom.window.document, { sourceUrl: 'fixture://css-noise' });
+    const drag = questions.find((question) => question.questionType === 'drag_order');
+
+    assert.ok(drag);
+    assert.equal(drag.prompt, 'Установите соответствие между философами и воззрениями.');
+    assert.doesNotMatch(drag.prompt, /answerPlaceStudent|!important|border:\s*1px|#allAnswers/i);
 });

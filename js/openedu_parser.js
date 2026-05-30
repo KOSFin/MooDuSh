@@ -5,6 +5,9 @@
     const LABEL_SELECTOR = 'label.response-label, label.field-label, .choicegroup label[for], label[for], label';
     const SYSTEM_TEXT_RE = /(MooDuSh|Вставить правильн|Вставить популярн|Нет статистики|Проверить|Отправить|Сохранить|Show answer|Ответы в задаче отмечены|Набрано\s+баллов|Использовано\s+попыток|Вы\s+использовали|Разместите\s+ответ\s+здесь)/i;
     const PROMPT_NOISE_RE = /\b(Выберите\s+((один|несколько|все|\d+|правильн)[^.:\n]*)|Дополните|Набрано\s+баллов:\s*\d+\s*из\s*\d+|Использовано\s+попыток:\s*\d+\s*из\s*\d+|Вы\s+использовали\s+\d+\s*из\s*\d+\s*попыток|Разместите\s+ответ\s+здесь|Вопрос\s+\d+|Show answer|Save|Сохранить|Проверить|Отправить|Ответы в задаче отмечены|None)\b/gi;
+    const CSS_DECLARATION_RE = /\b(?:align-items|animation|background(?:-color)?|border(?:-(?:color|radius|top-color))?|box-sizing|color|display|font(?:-size|-weight)?|height|justify-content|line-height|margin(?:-(?:bottom|left|right|top))?|max-width|min-height|opacity|overflow|padding(?:-(?:bottom|left|right|top))?|pointer-events|position|text-align|transform|transition|width|z-index)\s*:/ig;
+    const CSS_SELECTOR_RE = /(^|\s)[.#][a-z_-][\w-]*(?:[.#][a-z_-][\w-]*)?(?=\s|[,{:.#])/i;
+    const OPENEDU_CSS_MARKER_RE = /\b(?:answerPlaceStudent|allAnswers|loadingspinner|ui-sortable|btn-brand|submit-attempt-container|problem-action-buttons-wrapper)\b/i;
 
     const shared = root.ParamExtOpeneduShared || {};
 
@@ -58,9 +61,32 @@
     }
 
     function cleanPromptText(value) {
-        return collapseWhitespace(String(value || '')
+        const text = collapseWhitespace(String(value || '')
             .replace(PROMPT_NOISE_RE, ' ')
             .replace(/\s+([?.!,;:])/g, '$1'));
+        return looksLikeCssNoiseText(text) ? '' : text;
+    }
+
+    function looksLikeCssNoiseText(value) {
+        const text = collapseWhitespace(value);
+        if (!text) {
+            return false;
+        }
+
+        const declarations = text.match(CSS_DECLARATION_RE) || [];
+        CSS_DECLARATION_RE.lastIndex = 0;
+        if (declarations.length === 0) {
+            return false;
+        }
+
+        const hasCssSyntax = /[{};]/.test(text) || /!important\b/i.test(text);
+        if (OPENEDU_CSS_MARKER_RE.test(text) && (hasCssSyntax || declarations.length >= 1)) {
+            return true;
+        }
+        if (CSS_SELECTOR_RE.test(text) && (hasCssSyntax || declarations.length >= 2)) {
+            return true;
+        }
+        return declarations.length >= 3 && hasCssSyntax;
     }
 
     function fingerprintQuestion(prompt, answers) {
@@ -87,7 +113,7 @@
             return '';
         }
         const clone = node.cloneNode(true);
-        clone.querySelectorAll('script, style, button, .moodush-openedu-inline-menu').forEach((item) => item.remove());
+        clone.querySelectorAll('script, style, noscript, template, link, meta, button, [hidden], [aria-hidden="true"], .moodush-openedu-inline-menu, .MathJax_Preview, .MJX_Assistive_MathML, mjx-assistive-mml').forEach((item) => item.remove());
         return collapseWhitespace(clone.textContent || '');
     }
 

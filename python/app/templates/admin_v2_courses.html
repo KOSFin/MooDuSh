@@ -4,6 +4,10 @@
 {% block content %}
 <div class="section-head">
     <h2>Курсы OpenEdu V2 <span class="text-muted">({{ data.total }})</span></h2>
+    <form method="post" action="/admin/v2/purge" class="inline-form" onsubmit="return confirm('Удалить все данные OpenEdu V2?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn btn-danger">Очистить V2</button>
+    </form>
 </div>
 
 <form method="get" action="/admin/v2/courses" class="search-row">
@@ -23,6 +27,7 @@
                 <th>Вопросы</th>
                 <th>Попытки</th>
                 <th>Обновлен</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -38,9 +43,16 @@
                 <td>{{ c.question_count }}</td>
                 <td>{{ c.attempt_count }}</td>
                 <td class="text-muted">{{ c.updated_at.strftime('%d.%m.%Y %H:%M') if c.updated_at else '-' }}</td>
+                <td>
+                    <form method="post" action="/admin/v2/courses/delete" class="inline-form" onsubmit="return confirm('Удалить этот курс V2 вместе с вопросами, ответами и попытками?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="course_id" value="{{ c.course_id }}">
+                        <button type="submit" class="btn btn-danger btn-small">Удалить</button>
+                    </form>
+                </td>
             </tr>
         {% else %}
-            <tr><td colspan="7" class="empty">Курсов V2 пока нет.</td></tr>
+            <tr><td colspan="8" class="empty">Курсов V2 пока нет.</td></tr>
         {% endfor %}
         </tbody>
     </table>

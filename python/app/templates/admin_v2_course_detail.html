@@ -7,7 +7,14 @@
         <h2 class="cell-wrap">{{ data.course.title or data.course.course_id }}</h2>
         <p class="text-muted">{{ data.course.host }} · {{ data.course.course_id }}</p>
     </div>
-    <a class="btn btn-secondary" href="/admin/v2/courses">Назад</a>
+    <div class="header-actions">
+        <form method="post" action="/admin/v2/courses/delete" class="inline-form" onsubmit="return confirm('Удалить этот курс V2 вместе с вопросами, ответами и попытками?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="course_id" value="{{ data.course.course_id }}">
+            <button type="submit" class="btn btn-danger">Удалить курс</button>
+        </form>
+        <a class="btn btn-secondary" href="/admin/v2/courses">Назад</a>
+    </div>
 </div>
 
 <section class="cards">
@@ -142,6 +149,13 @@
                         <div class="metric"><span>Верно</span><strong>{{ q.verified_count }}</strong></div>
                         <div class="metric"><span>Fallback</span><strong>{{ q.fallback_count }}</strong></div>
                         <div class="metric"><span>Bad</span><strong>{{ q.incorrect_count }}</strong></div>
+                        <form method="post" action="/admin/v2/questions/delete" class="metric-action" onsubmit="return confirm('Удалить этот вопрос V2 вместе с ответами и состоянием участников?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="hidden" name="course_id" value="{{ data.course.course_id }}">
+                            <input type="hidden" name="test_key" value="{{ q.test_key }}">
+                            <input type="hidden" name="question_key" value="{{ q.question_key }}">
+                            <button type="submit" class="btn btn-danger btn-small">Удалить вопрос</button>
+                        </form>
                     </div>
                 </article>
             {% else %}

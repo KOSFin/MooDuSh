@@ -17,6 +17,13 @@ _NORM_WS_RE = re.compile(r'\s+')
 _ZERO_WIDTH_RE = re.compile(r'[\u200b-\u200f\ufeff]')
 _QUESTION_UI_RE = re.compile(r'(\|\*\~?\??|\?+\s*(?=MooDuSh|Вставить)|похож\.)', re.IGNORECASE)
 _TRAILING_COUNT_RE = re.compile(r'(^|\s)\d+(?=\s|$)')
+_CSS_DECLARATION_RE = re.compile(
+    r'\b(?:align-items|animation|background(?:-color)?|border(?:-(?:color|radius|top-color))?|box-sizing|color|display|font(?:-size|-weight)?|height|justify-content|line-height|margin(?:-(?:bottom|left|right|top))?|max-width|min-height|opacity|overflow|padding(?:-(?:bottom|left|right|top))?|pointer-events|position|text-align|transform|transition|width|z-index)\s*:',
+    re.IGNORECASE,
+)
+_CSS_SELECTOR_RE = re.compile(r'(^|\s)[.#][a-z_-][\w-]*(?:[.#][a-z_-][\w-]*)?(?=\s|[,{:.#])', re.IGNORECASE)
+_OPENEDU_CSS_MARKER_RE = re.compile(r'\b(?:answerPlaceStudent|allAnswers|loadingspinner|ui-sortable|btn-brand|submit-attempt-container|problem-action-buttons-wrapper)\b', re.IGNORECASE)
+OPENEDU_V2_UNMAPPED_COURSE_ID = '__unmapped__'
 _TEX_COMMANDS = {
     'Alpha': 'Α',
     'Beta': 'Β',
@@ -223,6 +230,23 @@ def sanitize_answer_text(answer_text: str) -> str:
     return re.sub(r'\s+([?.!,;:])', r'\1', text)
 
 
+def looks_like_css_noise_text(value: str) -> bool:
+    text = collapse_whitespace(value)
+    if not text:
+        return False
+
+    declarations = _CSS_DECLARATION_RE.findall(text)
+    if not declarations:
+        return False
+
+    has_css_syntax = bool(re.search(r'[{};]', text) or re.search(r'!important\b', text, re.IGNORECASE))
+    if _OPENEDU_CSS_MARKER_RE.search(text) and (has_css_syntax or len(declarations) >= 1):
+        return True
+    if _CSS_SELECTOR_RE.search(text) and (has_css_syntax or len(declarations) >= 2):
+        return True
+    return len(declarations) >= 3 and has_css_syntax
+
+
 def normalize_prompt(prompt: str) -> str:
     text = _NORM_PUNCT_RE.sub('', sanitize_question_prompt(prompt))
     return _NORM_WS_RE.sub(' ', text).strip().lower()
@@ -289,6 +313,17 @@ def is_exact_question_content_match(
 class Database:
     def __init__(self) -> None:
         self.pool: asyncpg.Pool | None = None
+
+    @staticmethod
+    def _command_count(status: str) -> int:
+        try:
+            return int(str(status or '').rsplit(' ', 1)[-1])
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _v2_admin_course_filter(course_id: str) -> str:
+        return '' if course_id == OPENEDU_V2_UNMAPPED_COURSE_ID else str(course_id or '')
 
     async def connect(self) -> None:
         self.pool = await asyncpg.create_pool(
@@ -1597,6 +1632,8 @@ class Database:
         question_type = str(question.get('questionType') or 'unknown').strip().lower()
         if not prompt:
             return 'empty_prompt'
+        if looks_like_css_noise_text(prompt):
+            return 'css_prompt_noise'
         if len(prompt) > 12000:
             return 'prompt_too_large'
         if question_type in {'', 'unknown', 'unsupported'}:
@@ -2427,7 +2464,8 @@ class Database:
 
     async def get_admin_v2_courses_page(self, search: str = '', limit: int = 50, offset: int = 0) -> dict[str, Any]:
         assert self.pool is not None
-        needle = '%' + search.strip() + '%' if search.strip() else ''
+        search_clean = search.strip()
+        needle = '%' + search_clean + '%' if search_clean else ''
         async with self.pool.acquire() as conn:
             if needle:
                 total = await conn.fetchval(
@@ -2481,15 +2519,120 @@ class Database:
                     """,
                     limit, offset,
                 )
-        return {'total': int(total or 0), 'courses': [dict(r) for r in rows], 'search': search.strip()}
+
+            if needle:
+                unmapped_exists = await conn.fetchval(
+                    """
+                    SELECT
+                        EXISTS (
+                            SELECT 1 FROM openedu_v2_tests
+                            WHERE course_id = ''
+                              AND (test_key ILIKE $1 OR host ILIKE $1 OR path ILIKE $1 OR title ILIKE $1)
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM openedu_v2_questions
+                            WHERE course_id = ''
+                              AND (test_key ILIKE $1 OR question_key ILIKE $1 OR prompt ILIKE $1 OR vertical_id ILIKE $1)
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM openedu_v2_parse_reports
+                            WHERE course_id = ''
+                              AND (test_key ILIKE $1 OR question_key ILIKE $1 OR prompt_preview ILIKE $1 OR vertical_id ILIKE $1)
+                        )
+                    """,
+                    needle,
+                )
+            else:
+                unmapped_exists = await conn.fetchval(
+                    """
+                    SELECT
+                        EXISTS (SELECT 1 FROM openedu_v2_tests WHERE course_id = '')
+                        OR EXISTS (SELECT 1 FROM openedu_v2_questions WHERE course_id = '')
+                        OR EXISTS (SELECT 1 FROM openedu_v2_parse_reports WHERE course_id = '')
+                    """,
+                )
+
+            row_items = [dict(r) for r in rows]
+            if unmapped_exists:
+                total = int(total or 0) + 1
+                if offset == 0:
+                    unmapped = await conn.fetchrow(
+                        """
+                        WITH test_keys AS (
+                            SELECT test_key FROM openedu_v2_tests WHERE course_id = ''
+                            UNION
+                            SELECT test_key FROM openedu_v2_questions WHERE course_id = ''
+                            UNION
+                            SELECT test_key FROM openedu_v2_parse_reports WHERE course_id = ''
+                        ),
+                        timestamps AS (
+                            SELECT updated_at FROM openedu_v2_tests WHERE course_id = ''
+                            UNION ALL
+                            SELECT updated_at FROM openedu_v2_questions WHERE course_id = ''
+                            UNION ALL
+                            SELECT created_at AS updated_at FROM openedu_v2_parse_reports WHERE course_id = ''
+                            UNION ALL
+                            SELECT created_at AS updated_at FROM openedu_v2_attempts WHERE test_key IN (SELECT test_key FROM test_keys)
+                        )
+                        SELECT
+                            $1::text AS course_id,
+                            COALESCE((SELECT host FROM openedu_v2_tests WHERE course_id = '' AND host != '' ORDER BY updated_at DESC LIMIT 1), '') AS host,
+                            'Без курса / unmapped' AS title,
+                            (SELECT MAX(updated_at) FROM timestamps) AS updated_at,
+                            0 AS chapter_count,
+                            0 AS sequential_count,
+                            COUNT(DISTINCT NULLIF(COALESCE(q.vertical_id, t.vertical_id), '')) AS vertical_count,
+                            COUNT(DISTINCT (q.test_key, q.question_key)) FILTER (WHERE q.test_key IS NOT NULL AND q.question_key IS NOT NULL) AS question_count,
+                            (SELECT COUNT(*) FROM openedu_v2_attempts WHERE test_key IN (SELECT test_key FROM test_keys)) AS attempt_count
+                        FROM openedu_v2_questions q
+                        FULL OUTER JOIN openedu_v2_tests t ON t.test_key = q.test_key AND t.course_id = ''
+                        WHERE COALESCE(q.course_id, '') = '' OR COALESCE(t.course_id, '') = ''
+                        """,
+                        OPENEDU_V2_UNMAPPED_COURSE_ID,
+                    )
+                    if unmapped:
+                        row_items.insert(0, dict(unmapped))
+
+        return {'total': int(total or 0), 'courses': row_items, 'search': search_clean}
 
     async def get_admin_v2_course_detail(self, course_id: str) -> dict[str, Any]:
         assert self.pool is not None
+        course_filter = self._v2_admin_course_filter(course_id)
         async with self.pool.acquire() as conn:
-            course = await conn.fetchrow(
-                "SELECT * FROM openedu_v2_courses WHERE course_id = $1",
-                course_id,
-            )
+            if course_id == OPENEDU_V2_UNMAPPED_COURSE_ID:
+                unmapped_exists = await conn.fetchval(
+                    """
+                    SELECT
+                        EXISTS (SELECT 1 FROM openedu_v2_tests WHERE course_id = '')
+                        OR EXISTS (SELECT 1 FROM openedu_v2_questions WHERE course_id = '')
+                        OR EXISTS (SELECT 1 FROM openedu_v2_parse_reports WHERE course_id = '')
+                    """,
+                )
+                course = {
+                    'course_id': OPENEDU_V2_UNMAPPED_COURSE_ID,
+                    'host': await conn.fetchval(
+                        "SELECT host FROM openedu_v2_tests WHERE course_id = '' AND host != '' ORDER BY updated_at DESC LIMIT 1",
+                    ) or '',
+                    'title': 'Без курса / unmapped',
+                    'updated_at': await conn.fetchval(
+                        """
+                        SELECT MAX(updated_at)
+                        FROM (
+                            SELECT updated_at FROM openedu_v2_tests WHERE course_id = ''
+                            UNION ALL
+                            SELECT updated_at FROM openedu_v2_questions WHERE course_id = ''
+                            UNION ALL
+                            SELECT created_at AS updated_at FROM openedu_v2_parse_reports WHERE course_id = ''
+                        ) x
+                        """,
+                    ),
+                    'created_at': None,
+                } if unmapped_exists else None
+            else:
+                course = await conn.fetchrow(
+                    "SELECT * FROM openedu_v2_courses WHERE course_id = $1",
+                    course_filter,
+                )
             if not course:
                 return {'course': None}
             counters = await conn.fetchrow(
@@ -2501,7 +2644,7 @@ class Database:
                     (SELECT COUNT(*) FROM openedu_v2_questions WHERE course_id = $1) AS questions,
                     (SELECT COUNT(*) FROM openedu_v2_parse_reports WHERE course_id = $1) AS parse_reports
                 """,
-                course_id,
+                course_filter,
             )
             chapters = await conn.fetch(
                 """
@@ -2517,7 +2660,7 @@ class Database:
                 GROUP BY ch.chapter_id, ch.title, ch.order_index
                 ORDER BY ch.order_index, ch.title, ch.chapter_id
                 """,
-                course_id,
+                course_filter,
             )
             sequentials = await conn.fetch(
                 """
@@ -2531,7 +2674,7 @@ class Database:
                 GROUP BY s.chapter_id, s.sequential_id, s.title, s.order_index
                 ORDER BY s.order_index, s.title, s.sequential_id
                 """,
-                course_id,
+                course_filter,
             )
             verticals = await conn.fetch(
                 """
@@ -2545,7 +2688,7 @@ class Database:
                 GROUP BY v.chapter_id, v.sequential_id, v.vertical_id, v.title, v.order_index
                 ORDER BY v.order_index, v.title, v.vertical_id
                 """,
-                course_id,
+                course_filter,
             )
             recent_questions = await conn.fetch(
                 """
@@ -2567,7 +2710,7 @@ class Database:
                 ORDER BY q.updated_at DESC
                 LIMIT 50
                 """,
-                course_id,
+                course_filter,
             )
             recent_answer_rows = await conn.fetch(
                 """
@@ -2585,7 +2728,7 @@ class Database:
                 JOIN recent r ON r.test_key = a.test_key AND r.question_key = a.question_key
                 ORDER BY a.verified_count DESC, a.fallback_count DESC, a.updated_at DESC
                 """,
-                course_id,
+                course_filter,
             )
             version_stats = await conn.fetch(
                 """
@@ -2602,7 +2745,7 @@ class Database:
                 ORDER BY question_count DESC, extension_version DESC
                 LIMIT 30
                 """,
-                course_id,
+                course_filter,
             )
             type_stats = await conn.fetch(
                 """
@@ -2615,7 +2758,7 @@ class Database:
                 GROUP BY question_type
                 ORDER BY question_count DESC, question_type
                 """,
-                course_id,
+                course_filter,
             )
             reports = await conn.fetch(
                 """
@@ -2626,7 +2769,7 @@ class Database:
                 ORDER BY created_at DESC
                 LIMIT 40
                 """,
-                course_id,
+                course_filter,
             )
         answers_by_question: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for row in recent_answer_rows:
@@ -2665,6 +2808,119 @@ class Database:
             'type_stats': [dict(r) for r in type_stats],
             'reports': [dict(r) for r in reports],
         }
+
+    async def delete_admin_v2_question(self, test_key: str, question_key: str) -> dict[str, int]:
+        assert self.pool is not None
+        test_key = str(test_key or '').strip()
+        question_key = str(question_key or '').strip()
+        if not test_key or not question_key:
+            return {}
+
+        deleted: dict[str, int] = {}
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                deleted['parse_reports'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_parse_reports WHERE test_key = $1 AND question_key = $2",
+                    test_key, question_key,
+                ))
+                deleted['participant_state'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_participant_question_state WHERE test_key = $1 AND question_key = $2",
+                    test_key, question_key,
+                ))
+                deleted['answers'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_answers WHERE test_key = $1 AND question_key = $2",
+                    test_key, question_key,
+                ))
+                deleted['questions'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_questions WHERE test_key = $1 AND question_key = $2",
+                    test_key, question_key,
+                ))
+        return deleted
+
+    async def delete_admin_v2_course(self, course_id: str) -> dict[str, int]:
+        assert self.pool is not None
+        course_filter = self._v2_admin_course_filter(course_id)
+        deleted: dict[str, int] = {}
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                test_rows = await conn.fetch(
+                    """
+                    SELECT test_key FROM openedu_v2_tests WHERE course_id = $1
+                    UNION
+                    SELECT test_key FROM openedu_v2_questions WHERE course_id = $1
+                    UNION
+                    SELECT test_key FROM openedu_v2_parse_reports WHERE course_id = $1
+                    """,
+                    course_filter,
+                )
+                test_keys = [str(row['test_key']) for row in test_rows if row['test_key']]
+
+                deleted['parse_reports'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_parse_reports WHERE course_id = $1 OR test_key = ANY($2::text[])",
+                    course_filter, test_keys,
+                ))
+                deleted['participant_state'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_participant_question_state WHERE test_key = ANY($1::text[])",
+                    test_keys,
+                ))
+                deleted['answers'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_answers WHERE test_key = ANY($1::text[])",
+                    test_keys,
+                ))
+                deleted['questions'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_questions WHERE course_id = $1 OR test_key = ANY($2::text[])",
+                    course_filter, test_keys,
+                ))
+                deleted['attempts'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_attempts WHERE test_key = ANY($1::text[])",
+                    test_keys,
+                ))
+                deleted['frames'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_frames WHERE course_id = $1 OR test_key = ANY($2::text[])",
+                    course_filter, test_keys,
+                ))
+                deleted['tests'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_tests WHERE course_id = $1 OR test_key = ANY($2::text[])",
+                    course_filter, test_keys,
+                ))
+                deleted['verticals'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_verticals WHERE course_id = $1",
+                    course_filter,
+                ))
+                deleted['sequentials'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_sequentials WHERE course_id = $1",
+                    course_filter,
+                ))
+                deleted['chapters'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_chapters WHERE course_id = $1",
+                    course_filter,
+                ))
+                deleted['courses'] = 0 if course_id == OPENEDU_V2_UNMAPPED_COURSE_ID else self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_courses WHERE course_id = $1",
+                    course_filter,
+                ))
+        return deleted
+
+    async def delete_admin_v2_all(self) -> dict[str, int]:
+        assert self.pool is not None
+        deleted: dict[str, int] = {}
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for table in (
+                    'openedu_v2_parse_reports',
+                    'openedu_v2_participant_question_state',
+                    'openedu_v2_answers',
+                    'openedu_v2_questions',
+                    'openedu_v2_attempts',
+                    'openedu_v2_frames',
+                    'openedu_v2_tests',
+                    'openedu_v2_verticals',
+                    'openedu_v2_sequentials',
+                    'openedu_v2_chapters',
+                    'openedu_v2_courses',
+                ):
+                    deleted[table.replace('openedu_v2_', '')] = self._command_count(await conn.execute(f'DELETE FROM {table}'))
+        return deleted
 
     async def get_admin_users_page(self, search: str = '', limit: int = 50, offset: int = 0) -> dict[str, Any]:
         assert self.pool is not None

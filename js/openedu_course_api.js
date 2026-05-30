@@ -2,10 +2,29 @@
     const COURSE_ID_RE = /course-v1:[^/?#\s]+/;
     const BLOCK_ID_RE = /block-v1:[^/?#\s]+/;
 
+    function courseIdFromBlockId(blockId) {
+        const match = String(blockId || '').match(/^block-v1:([^+]+)\+([^+]+)\+([^+]+)\+/);
+        return match ? ('course-v1:' + match[1] + '+' + match[2] + '+' + match[3]) : '';
+    }
+
+    function decodeUrlTextSafe(value) {
+        const raw = String(value || '');
+        try {
+            return decodeURIComponent(raw);
+        } catch (_) {
+            return raw;
+        }
+    }
+
     function findCourseId(url) {
-        const value = String(url || root.location?.href || '');
+        const raw = String(url || root.location?.href || '');
+        const value = raw + ' ' + decodeUrlTextSafe(raw);
         const match = value.match(COURSE_ID_RE);
-        return match ? match[0] : '';
+        if (match) {
+            return match[0];
+        }
+        const blockMatch = value.match(BLOCK_ID_RE);
+        return blockMatch ? courseIdFromBlockId(blockMatch[0]) : '';
     }
 
     function blockKind(blockId) {
@@ -15,7 +34,8 @@
     }
 
     function extractBlockId(urlOrText) {
-        const match = String(urlOrText || '').match(BLOCK_ID_RE);
+        const raw = String(urlOrText || '');
+        const match = (raw + ' ' + decodeUrlTextSafe(raw)).match(BLOCK_ID_RE);
         return match ? match[0] : '';
     }
 
@@ -155,6 +175,7 @@
     root.ParamExtOpeneduCourseApi = {
         findCourseId,
         extractBlockId,
+        courseIdFromBlockId,
         buildVerticalXBlockUrl,
         buildCourseMap,
         fetchVerticalHtml,

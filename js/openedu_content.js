@@ -536,7 +536,22 @@
 
         if (node instanceof Element) {
             const clone = node.cloneNode(true);
-            clone.querySelectorAll(PARAMEXT_WIDGET_SELECTOR).forEach((item) => item.remove());
+            clone.querySelectorAll([
+                PARAMEXT_WIDGET_SELECTOR,
+                'script',
+                'style',
+                'noscript',
+                'template',
+                'link',
+                'meta',
+                'button',
+                '[hidden]',
+                '[aria-hidden="true"]',
+                '.moodush-openedu-inline-menu',
+                '.MathJax_Preview',
+                '.MJX_Assistive_MathML',
+                'mjx-assistive-mml'
+            ].join(',')).forEach((item) => item.remove());
             return (clone.textContent || '').replace(/\s+/g, ' ').trim();
         }
 
@@ -798,11 +813,47 @@
         }
     }
 
-    function getCourseRefForQuestion(question) {
+    function decodeUrlTextSafe(value) {
+        const raw = String(value || '');
+        try {
+            return decodeURIComponent(raw);
+        } catch (_) {
+            return raw;
+        }
+    }
+
+    function extractOpeneduBlockId(value) {
         const courseApi = window.ParamExtOpeneduCourseApi || {};
-        const courseId = typeof courseApi.findCourseId === 'function' ? courseApi.findCourseId(location.href) : '';
+        if (typeof courseApi.extractBlockId !== 'function') {
+            return '';
+        }
+        const raw = String(value || '');
+        return courseApi.extractBlockId(raw) || courseApi.extractBlockId(decodeUrlTextSafe(raw));
+    }
+
+    function findOpeneduCourseId(value) {
+        const courseApi = window.ParamExtOpeneduCourseApi || {};
+        if (typeof courseApi.findCourseId !== 'function') {
+            return '';
+        }
+        const raw = String(value || '');
+        return courseApi.findCourseId(raw) || courseApi.findCourseId(decodeUrlTextSafe(raw));
+    }
+
+    function courseIdFromBlockId(blockId) {
+        const match = String(blockId || '').match(/^block-v1:([^+]+)\+([^+]+)\+([^+]+)\+/);
+        return match ? ('course-v1:' + match[1] + '+' + match[2] + '+' + match[3]) : '';
+    }
+
+    function getCourseRefForQuestion(question) {
         const source = String(question?.sourcePath || location.href || '');
-        const verticalId = typeof courseApi.extractBlockId === 'function' ? courseApi.extractBlockId(source) : '';
+        const verticalId = extractOpeneduBlockId(source)
+            || extractOpeneduBlockId(location.href)
+            || extractOpeneduBlockId(document.referrer || '');
+        const courseId = findOpeneduCourseId(location.href)
+            || findOpeneduCourseId(source)
+            || findOpeneduCourseId(document.referrer || '')
+            || courseIdFromBlockId(verticalId);
         const matched = openeduCourseVerticals.find((item) => item.verticalId === verticalId)
             || openeduCourseVerticals.find((item) => item.courseId === courseId)
             || {};
@@ -830,7 +881,7 @@
         const hasText = answers.some((option) => option.inputType === 'text');
         const hasCheckbox = answers.some((option) => option.inputType === 'checkbox');
         const hasRadio = answers.some((option) => option.inputType === 'radio');
-        const hasDragTable = answers.some((option) => option.inputType === 'drag-table');
+        const hasDragTable = answers.some((option) => option.inputType === 'drag-table' || option.inputType === 'matching-table');
         const hasDragOrder = answers.some((option) => option.inputType === 'drag-order');
         const hasSelect = answers.some((option) => option.inputType === 'select');
         const questionType = hasDragOrder
@@ -1384,7 +1435,7 @@
             return false;
         }
 
-        const probePaths = ['/healthz', '/health', '/v2/status'];
+        const probePaths = ['/healthz', '/health', openeduApiPrefix() + '/status'];
         let hasHttpResponse = false;
 
         for (const path of probePaths) {
@@ -2177,6 +2228,31 @@
     }
 
     const PROMPT_NOISE_RE = /^(?:набран\w*\s+баллов|использован\w*\s+попыток|вы\s+использовали\s+\d+\s*из\s*\d+\s*попыток|разместите\s+ответ\s+здесь|перетащите\s+(?:ответ(?:ы)?|элемент(?:ы)?))\b/i;
+    const CSS_DECLARATION_RE = /\b(?:align-items|animation|background(?:-color)?|border(?:-(?:color|radius|top-color))?|box-sizing|color|display|font(?:-size|-weight)?|height|justify-content|line-height|margin(?:-(?:bottom|left|right|top))?|max-width|min-height|opacity|overflow|padding(?:-(?:bottom|left|right|top))?|pointer-events|position|text-align|transform|transition|width|z-index)\s*:/ig;
+    const CSS_SELECTOR_RE = /(^|\s)[.#][a-z_-][\w-]*(?:[.#][a-z_-][\w-]*)?(?=\s|[,{:.#])/i;
+    const OPENEDU_CSS_MARKER_RE = /\b(?:answerPlaceStudent|allAnswers|loadingspinner|ui-sortable|btn-brand|submit-attempt-container|problem-action-buttons-wrapper)\b/i;
+
+    function looksLikeCssNoiseText(value) {
+        const text = collapseWhitespace(value);
+        if (!text) {
+            return false;
+        }
+
+        const declarations = text.match(CSS_DECLARATION_RE) || [];
+        CSS_DECLARATION_RE.lastIndex = 0;
+        if (declarations.length === 0) {
+            return false;
+        }
+
+        const hasCssSyntax = /[{};]/.test(text) || /!important\b/i.test(text);
+        if (OPENEDU_CSS_MARKER_RE.test(text) && (hasCssSyntax || declarations.length >= 1)) {
+            return true;
+        }
+        if (CSS_SELECTOR_RE.test(text) && (hasCssSyntax || declarations.length >= 2)) {
+            return true;
+        }
+        return declarations.length >= 3 && hasCssSyntax;
+    }
 
     function isGenericQuestionInstructionText(value) {
         const text = normalizeText(String(value || '').replace(/[.!?:;…]+$/g, ''));
@@ -2197,7 +2273,7 @@
         if (!text) {
             return true;
         }
-        return PROMPT_NOISE_RE.test(text);
+        return PROMPT_NOISE_RE.test(text) || looksLikeCssNoiseText(text);
     }
 
     function getFirstPromptCandidate(root, selectorGroups) {
@@ -2321,6 +2397,7 @@
         const clone = cell.cloneNode(true);
         clone.querySelectorAll(
             PARAMEXT_WIDGET_SELECTOR
+            + ', script, style, noscript, template, link, meta'
             + ', input, select, option, button'
             + ', .status, .status-icon, .indicator-container, .sr'
         ).forEach((node) => node.remove());

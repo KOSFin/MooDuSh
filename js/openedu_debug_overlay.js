@@ -125,6 +125,35 @@
             : ('prompt: ' + raw);
     }
 
+    function normalizedText(value) {
+        return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function textOf(node) {
+        if (!(node instanceof Element)) {
+            return '';
+        }
+        const clone = node.cloneNode(true);
+        clone.querySelectorAll('script, style, noscript, template, link, meta, button, [hidden], [aria-hidden="true"], .moodush-openedu-inline-menu').forEach((item) => item.remove());
+        return normalizedText(clone.textContent || '');
+    }
+
+    function problemScope(rootNode) {
+        return rootNode.closest('.xblock-student_view-problem, [data-problem-id], .problems-wrapper, .problem, .vert')
+            || rootNode;
+    }
+
+    function controlText(node) {
+        return normalizedText([
+            node.textContent || '',
+            node.value || '',
+            node.getAttribute?.('data-value') || '',
+            node.getAttribute?.('aria-label') || '',
+            node.getAttribute?.('title') || '',
+            node.className || ''
+        ].join(' '));
+    }
+
     function render(questions, enabled) {
         const list = Array.isArray(questions) ? questions : [];
         clear(document);
@@ -137,9 +166,19 @@
             if (!rootNode) {
                 return;
             }
+            const scope = problemScope(rootNode);
+            const promptText = normalizedText(question?.prompt || '');
             rootNode.setAttribute(ATTR, 'question');
-            rootNode.querySelectorAll('.problem-header, .problem-title, .question-title, legend, h2, h3, h4').forEach((node) => {
-                node.setAttribute(ATTR, 'prompt');
+            scope.querySelectorAll('.problem-header, .problem-title, .question-title, .problem-group-label, legend, h2, h3, h4, .wrapper-problem-response > p').forEach((node) => {
+                const nodeText = textOf(node);
+                if (!promptText || !nodeText || promptText.includes(nodeText) || nodeText.includes(promptText)) {
+                    node.setAttribute(ATTR, 'prompt');
+                }
+            });
+            scope.querySelectorAll('img, svg, canvas, object, embed').forEach((node) => {
+                if (!node.getAttribute(ATTR)) {
+                    node.setAttribute(ATTR, 'prompt');
+                }
             });
             (Array.isArray(question.options) ? question.options : []).forEach((option) => {
                 const answerNode = getElementByPath(rootNode, option.inputPath || option.dragAnswerPath || '')
@@ -157,8 +196,8 @@
                     node.setAttribute(ATTR, 'answer');
                 }
             });
-            rootNode.querySelectorAll('button, input[type="submit"], input[type="button"]').forEach((node) => {
-                const text = String(node.textContent || node.value || node.getAttribute('data-value') || '').toLowerCase();
+            scope.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], .submit, .check, .save').forEach((node) => {
+                const text = controlText(node);
                 if (/провер|check|отправ|submit|save|сохран/.test(text)) {
                     node.setAttribute(ATTR, 'control');
                 }

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     telegram_topic_id: int = Field(default=0, alias='TELEGRAM_TOPIC_ID')
     telegram_proxy_url: str = Field(default='', alias='TELEGRAM_PROXY_URL')
 
-    extension_latest_version: str = Field(default='2.9.4', alias='EXTENSION_LATEST_VERSION')
+    extension_latest_version: str = Field(default='2.9.6', alias='EXTENSION_LATEST_VERSION')
     extension_release_url: str = Field(default='', alias='EXTENSION_RELEASE_URL')
     extension_repository_url: str = Field(default='', alias='EXTENSION_REPOSITORY_URL')
     extension_required_version: str = Field(default='', alias='EXTENSION_REQUIRED_VERSION')

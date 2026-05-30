@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus
 
 from .config import settings
 from .database import database
@@ -269,6 +269,45 @@ async def admin_v2_course_detail(request: Request, course_id: str):
         name='admin_v2_course_detail.html',
         context=_admin_context(request, 'v2_courses', data=data),
     )
+
+
+@admin_router.post('/admin/v2/purge')
+@admin_router.post('/api/admin/v2/purge')
+async def admin_v2_purge(request: Request, csrf_token: str = Form(..., alias=ADMIN_CSRF_FIELD)):
+    _require_admin_or_login(request)
+    verify_admin_csrf(request, csrf_token)
+    await database.delete_admin_v2_all()
+    return RedirectResponse(url='/admin/v2/courses', status_code=303)
+
+
+@admin_router.post('/admin/v2/courses/delete')
+@admin_router.post('/api/admin/v2/courses/delete')
+async def admin_v2_course_delete(
+    request: Request,
+    course_id: str = Form(...),
+    csrf_token: str = Form(..., alias=ADMIN_CSRF_FIELD),
+):
+    _require_admin_or_login(request)
+    verify_admin_csrf(request, csrf_token)
+    await database.delete_admin_v2_course(course_id)
+    return RedirectResponse(url='/admin/v2/courses', status_code=303)
+
+
+@admin_router.post('/admin/v2/questions/delete')
+@admin_router.post('/api/admin/v2/questions/delete')
+async def admin_v2_question_delete(
+    request: Request,
+    test_key: str = Form(...),
+    question_key: str = Form(...),
+    course_id: str = Form(''),
+    csrf_token: str = Form(..., alias=ADMIN_CSRF_FIELD),
+):
+    _require_admin_or_login(request)
+    verify_admin_csrf(request, csrf_token)
+    await database.delete_admin_v2_question(test_key, question_key)
+    if course_id:
+        return RedirectResponse(url=f'/admin/v2/courses/{quote(course_id, safe="")}', status_code=303)
+    return RedirectResponse(url='/admin/v2/courses', status_code=303)
 
 
 # ── Data API (JSON) ───────────────────────────────────────────────
