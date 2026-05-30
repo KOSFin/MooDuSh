@@ -8,171 +8,162 @@
     <link href="../../css/popup/popup_new.css" rel="stylesheet">
 </head>
 <body>
-    <div class="popup-shell">
+    <main class="popup-shell">
         <header class="popup-header">
-            <img src="../../logo_main.png" alt="Logo" class="logo" id="mainLogo">
-            <div>
-                <h1>MooDuSh</h1>
-                <p class="subline">Moodle и OpenEdu</p>
+            <div class="brand">
+                <img src="../../logo_main.png" alt="MooDuSh" class="logo" id="mainLogo">
+                <div>
+                    <h1>MooDuSh</h1>
+                    <p id="headerStatus">OpenEdu и Moodle</p>
+                </div>
             </div>
+            <div class="version-pill" id="versionPill">v...</div>
         </header>
 
-        <section class="platform-switch" aria-label="Переключение платформы">
-            <button type="button" id="platformMoodle" class="platform-btn" data-platform="moodle">Moodle</button>
-            <button type="button" id="platformOpenedu" class="platform-btn" data-platform="openedu">OpenEdu</button>
+        <section id="onboardingPanel" class="panel">
+            <div id="privacyStep" class="onboarding-step">
+                <h2>Перед началом</h2>
+                <p>Расширение обрабатывает технические данные страницы теста, чтобы находить вопросы, ответы и синхронизировать статистику с backend.</p>
+                <label class="check-row">
+                    <input type="checkbox" id="allowTechnicalDataCollection" checked>
+                    <span>Разрешить отправку технических логов ошибок</span>
+                </label>
+                <div class="action-row">
+                    <a href="../privacy_policy/index.html" target="_blank" class="btn btn-sm btn-outline-secondary">Политика</a>
+                    <button type="button" id="acceptPrivacyBtn" class="btn btn-sm btn-dark">Согласиться</button>
+                </div>
+            </div>
+
+            <div id="apiSetupStep" class="onboarding-step hidden">
+                <h2>Подключение</h2>
+                <p>Получите ключ в Telegram-боте и вставьте его ниже. Ключ хранится только в chrome.storage этого браузера.</p>
+                <a id="botLink" href="#" target="_blank" class="bot-link">Открыть Telegram-бота</a>
+                <label class="field">
+                    <span>Персональный ключ</span>
+                    <input type="password" id="backendApiToken" placeholder="Bearer token">
+                </label>
+                <label class="check-row">
+                    <input type="checkbox" id="customBackendToggle">
+                    <span>Использовать свой backend</span>
+                </label>
+                <div id="customBackendFields" class="hidden">
+                    <label class="field">
+                        <span>OpenEdu API URL</span>
+                        <input type="text" id="backendApiBaseUrl" placeholder="https://api.example.com">
+                    </label>
+                </div>
+                <input type="number" id="backendRequestTimeoutMs" class="hidden" min="1000" step="250">
+                <div class="action-row">
+                    <button type="button" id="backendPingBtn" class="btn btn-sm btn-outline-dark">Проверить</button>
+                    <button type="button" id="backendResetUrlBtn" class="btn btn-sm btn-outline-secondary">Сбросить URL</button>
+                    <span id="backendPingStatus" class="status-text">Не проверено</span>
+                </div>
+            </div>
         </section>
 
-        <section id="moodleSettings" class="settings-card">
-            <h2>Настройки Moodle</h2>
-            <div class="form-check">
-                <input class="form-check-input" type="radio" name="moodleMode" id="modeWand" value="wand">
-                <label class="form-check-label" for="modeWand">Палочка</label>
-            </div>
-            <div class="form-check">
-                <input class="form-check-input" type="radio" name="moodleMode" id="modeAutoInsert" value="autoInsert">
-                <label class="form-check-label" for="modeAutoInsert">Авто-вставка</label>
-            </div>
-            <div class="form-check mb-2">
-                <input class="form-check-input" type="radio" name="moodleMode" id="modeAutoSolve" value="autoSolve">
-                <label class="form-check-label" for="modeAutoSolve">Авто-прорешивание</label>
-            </div>
+        <nav class="tabs" aria-label="Разделы расширения">
+            <button type="button" class="tab active" data-tab="openedu">OpenEdu</button>
+            <button type="button" class="tab" data-tab="moodle">Moodle</button>
+            <button type="button" class="tab" data-tab="stats">Stats</button>
+            <button type="button" class="tab" data-tab="diagnostics">Diagnostics</button>
+        </nav>
 
-            <div id="autoSolveControls" class="hidden mb-2">
-                <div class="button-line">
-                    <button id="btnStart" class="btn btn-sm btn-success" type="button">Старт</button>
-                    <button id="btnStop" class="btn btn-sm btn-danger hidden" type="button">Стоп</button>
-                </div>
+        <section id="openeduSettings" class="panel tab-panel">
+            <div class="panel-head">
+                <h2>OpenEdu</h2>
+                <button type="button" id="platformOpenedu" class="platform-btn active">Активно</button>
             </div>
-
-            <div class="mb-2">
-                <label for="wandKey" class="form-label">Горячая клавиша (захват)</label>
-                <input type="text" class="form-control form-control-sm hotkey-input" id="wandKey" readonly>
+            <div class="segmented" role="radiogroup" aria-label="Режим OpenEdu">
+                <label><input type="radio" name="openeduMode" id="openeduModeStick" value="stick"><span>Палочка</span></label>
+                <label><input type="radio" name="openeduMode" id="openeduModeAssist" value="assist"><span>Авто-вставка</span></label>
+                <label><input type="radio" name="openeduMode" id="openeduModeAuto" value="autoSolve"><span>Авто-прохождение</span></label>
             </div>
-            <div class="mb-2">
-                <label for="nextBtnSelector" class="form-label">Текст кнопки Далее</label>
-                <input type="text" class="form-control form-control-sm" id="nextBtnSelector">
+            <div id="openeduStickOptions" class="option-block">
+                <label class="field">
+                    <span>Горячая клавиша</span>
+                    <input type="text" id="openeduHotkey" class="hotkey-input" readonly>
+                </label>
             </div>
-        </section>
-
-        <section id="openeduSettings" class="settings-card hidden">
-            <h2>Настройки OpenEdu</h2>
-            <div id="openeduSetupWarning" class="setup-warning">
-                <strong>Перед началом работы:</strong>
-                <ol>
-                    <li>Зарегистрируйтесь в <a id="openeduBotLink" href="#" target="_blank" class="hidden">Telegram-боте</a><span id="openeduBotLinkFallback">Telegram-боте (ссылка в настройках API)</span> командой /start</li>
-                    <li>Скопируйте полученный токен</li>
-                    <li>Вставьте токен в разделе «Настройки API» ниже</li>
-                    <li>Нажмите «Проверить API» — статус должен быть «Онлайн»</li>
-                </ol>
-                <span class="setup-warning-note">Без токена расширение не сможет получать и отправлять ответы.</span>
-            </div>
-            <div class="form-check">
-                <input class="form-check-input" type="radio" name="openeduMode" id="openeduModeStick" value="stick">
-                <label class="form-check-label" for="openeduModeStick">Палочка (как Moodle)</label>
-            </div>
-            <div class="form-check">
-                <input class="form-check-input" type="radio" name="openeduMode" id="openeduModeAssist" value="assist">
-                <label class="form-check-label" for="openeduModeAssist">Авто-вставка</label>
-            </div>
-            <div class="form-check mb-2">
-                <input class="form-check-input" type="radio" name="openeduMode" id="openeduModeAuto" value="autoSolve">
-                <label class="form-check-label" for="openeduModeAuto">Автоматический режим</label>
-            </div>
-
-            <div class="mb-2">
-                <label for="openeduHotkey" class="form-label">Горячая клавиша палочки OpenEdu</label>
-                <input type="text" class="form-control form-control-sm hotkey-input" id="openeduHotkey" readonly>
-            </div>
-
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="openeduAutoAdvanceEnabled">
-                <label class="form-check-label" for="openeduAutoAdvanceEnabled">Авто-переход после прохождения раздела</label>
-            </div>
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="openeduRequiredCompletionOnly">
-                <label class="form-check-label" for="openeduRequiredCompletionOnly">Переходить только после статуса "пройдено"</label>
-            </div>
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="openeduActiveTabRefreshEnabled">
-                <label class="form-check-label" for="openeduActiveTabRefreshEnabled">Обновлять состояние активного раздела</label>
-            </div>
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="openeduActiveTabPostSubmitRefreshEnabled">
-                <label class="form-check-label" for="openeduActiveTabPostSubmitRefreshEnabled">Обновлять активный раздел после проверки</label>
-            </div>
-            <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="openeduShowFallbackStats">
-                <label class="form-check-label" for="openeduShowFallbackStats">Использовать резервную статистику (как в Moodle)</label>
-            </div>
-
-            <div class="openedu-auto-options">
-                <h3>Авто-режимы</h3>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="openeduAutoUseSimilarAnswers">
-                    <label class="form-check-label" for="openeduAutoUseSimilarAnswers">Автоматически вставлять ответы похожих вопросов</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="openeduAutoUseFallbackAnswers">
-                    <label class="form-check-label" for="openeduAutoUseFallbackAnswers">Вставлять популярные ответы, если правильных нет</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="openeduAutoCheckAnswers">
-                    <label class="form-check-label" for="openeduAutoCheckAnswers">Авто-вставка проверяет ответы, если есть кнопка «Проверить»</label>
-                </div>
-                <div class="mb-2">
-                    <label for="openeduMissingAnswerAction" class="form-label">Если ответа нет</label>
-                    <select class="form-control form-control-sm" id="openeduMissingAnswerAction">
-                        <option value="stop">Ничего не делать</option>
-                        <option value="alert">Звук и перейти к вопросу</option>
-                        <option value="advance">Перейти к следующей странице</option>
+            <div id="openeduAssistOptions" class="option-block hidden">
+                <label class="check-row"><input type="checkbox" id="openeduAutoUseSimilarAnswers"><span>Использовать похожие вопросы</span></label>
+                <label class="check-row"><input type="checkbox" id="openeduAutoUseFallbackAnswers"><span>Использовать популярные ответы без подтверждения</span></label>
+                <label class="check-row"><input type="checkbox" id="openeduAutoCheckAnswers"><span>Нажимать «Проверить», если кнопка доступна</span></label>
+                <label class="field">
+                    <span>Если ответа нет</span>
+                    <select id="openeduMissingAnswerAction">
+                        <option value="stop">Остановиться</option>
+                        <option value="alert">Показать вопрос</option>
+                        <option value="advance">Перейти дальше</option>
                     </select>
-                </div>
+                </label>
             </div>
-
-            <div class="mb-2">
-                <label for="openeduAutoAdvanceDelayMs" class="form-label">Задержка авто-перехода (мс)</label>
-                <input type="number" min="500" step="100" class="form-control form-control-sm" id="openeduAutoAdvanceDelayMs">
-            </div>
-        </section>
-
-        <div class="actions actions-api-toggle">
-            <button id="toggleBackendSettingsBtn" class="settings-mini-btn" type="button">Настройки API</button>
-        </div>
-
-        <section id="backendSettingsPanel" class="settings-card backend-panel hidden">
-            <h2>Подключение к бэкенду</h2>
-            <section class="platform-switch compact" aria-label="Платформа для API">
-                <button type="button" id="backendPlatformMoodle" class="platform-btn" data-api-platform="moodle">API Moodle</button>
-                <button type="button" id="backendPlatformOpenedu" class="platform-btn" data-api-platform="openedu">API OpenEdu</button>
-            </section>
-            <div class="mb-2">
-                <label for="backendApiBaseUrl" class="form-label">Адрес API</label>
-                <input type="text" class="form-control form-control-sm" id="backendApiBaseUrl" placeholder="https://api.example.com">
-            </div>
-            <div class="mb-2">
-                <label for="backendApiToken" class="form-label">Bearer токен</label>
-                <input type="password" class="form-control form-control-sm" id="backendApiToken" placeholder="персональный токен из бота">
-                <a id="botLink" href="#" target="_blank" class="bot-link hidden">Получить токен в Telegram-боте</a>
-            </div>
-            <div class="mb-2">
-                <label for="backendRequestTimeoutMs" class="form-label">Таймаут запросов (мс)</label>
-                <input type="number" min="1000" step="250" class="form-control form-control-sm" id="backendRequestTimeoutMs">
-            </div>
-            <div class="backend-row">
-                <button id="backendPingBtn" class="btn btn-sm btn-outline-primary" type="button">Проверить API</button>
-                <button id="backendResetUrlBtn" class="btn btn-sm btn-outline-secondary" type="button">Сбросить путь</button>
-                <span id="backendPingStatus" class="backend-status">Не проверено</span>
+            <div id="openeduAutoOptions" class="option-block hidden">
+                <label class="check-row"><input type="checkbox" id="openeduAutoAdvanceEnabled"><span>Переходить к следующему разделу</span></label>
+                <label class="check-row dependent" id="requiredCompletionRow"><input type="checkbox" id="openeduRequiredCompletionOnly"><span>Только когда текущий раздел выполнен</span></label>
+                <label class="check-row"><input type="checkbox" id="openeduActiveTabRefreshEnabled"><span>Обновлять активный раздел</span></label>
+                <label class="check-row"><input type="checkbox" id="openeduActiveTabPostSubmitRefreshEnabled"><span>Обновлять после проверки</span></label>
+                <label class="check-row"><input type="checkbox" id="openeduShowFallbackStats"><span>Показывать резервную статистику</span></label>
+                <label class="field">
+                    <span>Задержка перехода, мс</span>
+                    <input type="number" min="500" step="100" id="openeduAutoAdvanceDelayMs">
+                </label>
             </div>
         </section>
 
-        <div class="actions">
-            <button id="btnSave" class="btn btn-primary w-100" type="button">Сохранить</button>
-            <a class="subscribe-btn" href="https://t.me/moodush_news" target="_blank" rel="noopener noreferrer">Подписаться на обновления расширения</a>
-        </div>
+        <section id="moodleSettings" class="panel tab-panel hidden">
+            <div class="panel-head">
+                <h2>Moodle</h2>
+                <button type="button" id="platformMoodle" class="platform-btn">Сделать активным</button>
+            </div>
+            <div class="segmented" role="radiogroup" aria-label="Режим Moodle">
+                <label><input type="radio" name="moodleMode" id="modeWand" value="wand"><span>Палочка</span></label>
+                <label><input type="radio" name="moodleMode" id="modeAutoInsert" value="autoInsert"><span>Авто-вставка</span></label>
+                <label><input type="radio" name="moodleMode" id="modeAutoSolve" value="autoSolve"><span>Авто-прохождение</span></label>
+            </div>
+            <div id="autoSolveControls" class="action-row hidden">
+                <button id="btnStart" class="btn btn-sm btn-success" type="button">Старт</button>
+                <button id="btnStop" class="btn btn-sm btn-danger hidden" type="button">Стоп</button>
+            </div>
+            <label class="field">
+                <span>Горячая клавиша</span>
+                <input type="text" id="wandKey" class="hotkey-input" readonly>
+            </label>
+            <label class="field">
+                <span>Текст кнопки далее</span>
+                <input type="text" id="nextBtnSelector">
+            </label>
+        </section>
 
-        <p class="footer-note">Нажмите клавишу или комбинацию прямо в поле горячей клавиши для автоматического захвата.</p>
-    </div>
+        <section id="statsPanel" class="panel tab-panel hidden">
+            <div class="panel-head">
+                <h2>Статистика</h2>
+                <button type="button" id="statsRefreshBtn" class="btn btn-sm btn-outline-dark">Обновить</button>
+            </div>
+            <div id="statsGrid" class="stats-grid">
+                <div><span>Курсы</span><strong id="statCourses">0</strong></div>
+                <div><span>Тесты</span><strong id="statTests">0</strong></div>
+                <div><span>Вопросы</span><strong id="statQuestions">0</strong></div>
+                <div><span>Верно</span><strong id="statCompletions">0</strong></div>
+            </div>
+        </section>
 
+        <section id="diagnosticsPanel" class="panel tab-panel hidden">
+            <div class="panel-head">
+                <h2>Диагностика</h2>
+                <button type="button" id="updateCheckBtn" class="btn btn-sm btn-outline-dark">Проверить обновления</button>
+            </div>
+            <label class="check-row"><input type="checkbox" id="openeduDebugOverlay"><span>Показывать разметку вопросов на OpenEdu</span></label>
+            <div class="diagnostics-list">
+                <div><span>Backend</span><strong id="backendCompactStatus">Не проверено</strong></div>
+                <div><span>Update</span><strong id="updateStatus">Не проверено</strong></div>
+                <div><span>Build</span><strong id="buildStatus">local</strong></div>
+            </div>
+        </section>
+
+        <button id="btnSave" class="btn btn-dark w-100" type="button">Сохранить</button>
+    </main>
+
+    <script src="../../js/build_config.js"></script>
     <script src="../../js/platform_settings.js"></script>
     <script src="../../js/telemetry.js"></script>
     <script src="../../js/popup_new.js"></script>

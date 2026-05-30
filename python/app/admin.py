@@ -234,6 +234,43 @@ async def admin_questions(request: Request, page: int = 1, q: str = ''):
     )
 
 
+# ── OpenEdu V2 course hierarchy ───────────────────────────────────
+
+@admin_router.get('/admin/v2/courses', response_class=HTMLResponse)
+@admin_router.get('/api/admin/v2/courses', response_class=HTMLResponse)
+async def admin_v2_courses(request: Request, page: int = 1, q: str = ''):
+    _require_admin_or_login(request)
+    offset = (max(1, page) - 1) * PAGE_SIZE
+    data = await database.get_admin_v2_courses_page(search=q, limit=PAGE_SIZE, offset=offset)
+    return templates.TemplateResponse(
+        request=request,
+        name='admin_v2_courses.html',
+        context=_admin_context(
+            request,
+            'v2_courses',
+            data=data,
+            page=max(1, page),
+            page_size=PAGE_SIZE,
+            search=q,
+            search_url=quote_plus(q),
+        ),
+    )
+
+
+@admin_router.get('/admin/v2/courses/{course_id:path}', response_class=HTMLResponse)
+@admin_router.get('/api/admin/v2/courses/{course_id:path}', response_class=HTMLResponse)
+async def admin_v2_course_detail(request: Request, course_id: str):
+    _require_admin_or_login(request)
+    data = await database.get_admin_v2_course_detail(course_id)
+    if not data.get('course'):
+        raise HTTPException(status_code=404, detail='Курс не найден')
+    return templates.TemplateResponse(
+        request=request,
+        name='admin_v2_course_detail.html',
+        context=_admin_context(request, 'v2_courses', data=data),
+    )
+
+
 # ── Data API (JSON) ───────────────────────────────────────────────
 
 @admin_router.get('/admin/data')

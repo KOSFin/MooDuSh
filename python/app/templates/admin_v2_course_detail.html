@@ -1,0 +1,99 @@
+{% extends "admin_base.html" %}
+{% block title %}Курс V2{% endblock %}
+{% block page_title %}Курс V2{% endblock %}
+{% block content %}
+<div class="section-head">
+    <h2 class="cell-wrap">{{ data.course.title or data.course.course_id }}</h2>
+    <a class="btn btn-secondary" href="/admin/v2/courses">Назад</a>
+</div>
+<p class="text-muted">{{ data.course.host }} · {{ data.course.course_id }}</p>
+
+<section class="cards">
+    <article class="card"><p>Разделы</p><h3>{{ data.counters.chapters }}</h3></article>
+    <article class="card"><p>Sequence</p><h3>{{ data.counters.sequentials }}</h3></article>
+    <article class="card"><p>Vertical</p><h3>{{ data.counters.verticals }}</h3></article>
+    <article class="card"><p>Вопросы</p><h3>{{ data.counters.questions }}</h3></article>
+    <article class="card"><p>Отчеты парсера</p><h3>{{ data.counters.parse_reports }}</h3></article>
+</section>
+
+<section class="panel">
+    <div class="panel-head"><h2>Структура курса</h2></div>
+    <table>
+        <thead><tr><th>Раздел</th><th>Sequence</th><th>Vertical</th><th>Вопросы</th></tr></thead>
+        <tbody>
+        {% for ch in data.chapters %}
+            <tr>
+                <td class="cell-wrap">{{ ch.title or ch.chapter_id }}<div class="text-muted">{{ ch.chapter_id }}</div></td>
+                <td>{{ ch.sequential_count }}</td>
+                <td>{{ ch.vertical_count }}</td>
+                <td>{{ ch.question_count }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="4" class="empty">Разделы пока не записаны.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<div class="grid-2">
+    <section class="panel">
+        <div class="panel-head"><h2>Последние вопросы</h2></div>
+        <div class="question-list">
+            {% for q in data.recent_questions %}
+                <article class="question-row">
+                    <div class="question-main">
+                        <div class="question-prompt">{{ q.prompt or q.question_key }}</div>
+                        <div class="question-meta">
+                            <span>{{ q.question_type }}</span>
+                            <span>confidence {{ "%.2f"|format(q.parse_confidence or 0) }}</span>
+                            <span>{{ q.vertical_id }}</span>
+                        </div>
+                    </div>
+                    <div class="metric-grid">
+                        <div class="metric"><span>Завершений</span><strong>{{ q.completed_count }}</strong></div>
+                    </div>
+                </article>
+            {% else %}
+                <div class="empty">Вопросов пока нет.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head"><h2>Карантин парсера</h2></div>
+        <table>
+            <thead><tr><th>Причина</th><th>Вопрос</th><th>Confidence</th></tr></thead>
+            <tbody>
+            {% for r in data.reports %}
+                <tr>
+                    <td><span class="badge badge-amber">{{ r.reason }}</span><div class="text-muted">{{ r.created_at.strftime('%d.%m.%Y %H:%M') if r.created_at else '-' }}</div></td>
+                    <td class="cell-wrap">{{ r.prompt_preview or r.question_key }}<div class="text-muted">{{ r.vertical_id }} · {{ r.question_type }}</div></td>
+                    <td>{{ "%.2f"|format(r.parse_confidence or 0) }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="3" class="empty">Карантин пуст.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+
+<section class="panel">
+    <div class="panel-head"><h2>Vertical / frame</h2></div>
+    <table>
+        <thead><tr><th>Vertical</th><th>Sequence</th><th>Вопросы</th><th>Тесты</th></tr></thead>
+        <tbody>
+        {% for v in data.verticals %}
+            <tr>
+                <td class="cell-wrap">{{ v.title or v.vertical_id }}<div class="text-muted">{{ v.vertical_id }}</div></td>
+                <td class="cell-wrap">{{ v.sequential_id }}</td>
+                <td>{{ v.question_count }}</td>
+                <td>{{ v.test_count }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="4" class="empty">Vertical пока нет.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

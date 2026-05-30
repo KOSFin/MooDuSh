@@ -1,17 +1,27 @@
+from __future__ import annotations
+
 import asyncio
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
+from typing import Optional
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .admin import admin_router
 from .bot import start_bot, stop_bot
 from .config import settings
 from .database import database
-from .schemas import LogPayloadIn, OpenEduAttemptIn, OpenEduSolutionsQueryIn
+from .schemas import (
+    LogPayloadIn,
+    LogPayloadV2In,
+    OpenEduAttemptIn,
+    OpenEduSolutionsQueryIn,
+    OpenEduV2AttemptIn,
+    OpenEduV2SolutionsQueryIn,
+)
 from .security import require_api_token, set_database_ref
-from .telegram import spawn_forward
+from .telegram import spawn_forward, spawn_forward_v2
 
 
 @asynccontextmanager
@@ -91,22 +101,45 @@ async def legacy_status() -> dict:
 
 @app.get('/v2/update')
 @app.get('/api/v2/update')
-async def legacy_update() -> dict:
-    return {'updateRequired': False, 'latestVersion': '2.9.0'}
+async def legacy_update(version: str = '', build_id: str = '') -> dict:
+    latest = settings.extension_latest_version or '2.9.0'
+    required = settings.extension_required_version or ''
+    return {
+        'updateRequired': bool(version and version != latest),
+        'latestVersion': latest,
+        'requiredVersion': required,
+        'releaseUrl': settings.extension_release_url,
+        'repositoryUrl': settings.extension_repository_url,
+        'buildKnown': _is_known_build_id(build_id),
+    }
+
+
+def _split_csv(value: str) -> set[str]:
+    return {part.strip() for part in str(value or '').split(',') if part.strip()}
+
+
+def _is_known_build_id(value: str) -> bool:
+    known = _split_csv(settings.extension_known_build_ids)
+    return not known or str(value or '').strip() in known
+
+
+def _is_known_parser_version(value: str) -> bool:
+    known = _split_csv(settings.openedu_known_parser_versions)
+    return not known or str(value or '').strip() in known
 
 
 # ── OpenEdu API ────────────────────────────────────────────────────
 
 @app.post('/v1/openedu/attempts')
 @app.post('/api/v1/openedu/attempts')
-async def post_openedu_attempt(payload: OpenEduAttemptIn, user_id: int | None = Depends(require_api_token)) -> dict:
+async def post_openedu_attempt(payload: OpenEduAttemptIn, user_id: Optional[int] = Depends(require_api_token)) -> dict:
     await database.upsert_openedu_attempt(payload.model_dump(), user_id=user_id)
     return {'ok': True}
 
 
 @app.post('/v1/openedu/solutions/query')
 @app.post('/api/v1/openedu/solutions/query')
-async def post_openedu_query(payload: OpenEduSolutionsQueryIn, user_id: int | None = Depends(require_api_token)) -> dict:
+async def post_openedu_query(payload: OpenEduSolutionsQueryIn, user_id: Optional[int] = Depends(require_api_token)) -> dict:
     from .database import (
         compute_question_fingerprint as _fingerprint,
         is_exact_question_content_match as _is_exact_match,
@@ -169,11 +202,67 @@ async def post_openedu_query(payload: OpenEduSolutionsQueryIn, user_id: int | No
     return {'statsByQuestion': stats}
 
 
+# ── OpenEdu API V2 ────────────────────────────────────────────────
+
+@app.post('/v2/openedu/attempts')
+@app.post('/api/v2/openedu/attempts')
+async def post_openedu_v2_attempt(payload: OpenEduV2AttemptIn, user_id: Optional[int] = Depends(require_api_token)) -> dict:
+    result = await database.upsert_openedu_v2_attempt(payload.model_dump(), user_id=user_id)
+    return {
+        'ok': True,
+        'accepted': result.get('accepted', 0),
+        'quarantined': result.get('quarantined', 0),
+        'duplicate': bool(result.get('duplicate', 0)),
+        'buildKnown': _is_known_build_id(payload.client.buildId),
+        'parserKnown': _is_known_parser_version(payload.client.parserVersion),
+    }
+
+
+@app.post('/v2/openedu/solutions/query')
+@app.post('/api/v2/openedu/solutions/query')
+async def post_openedu_v2_query(payload: OpenEduV2SolutionsQueryIn, user_id: Optional[int] = Depends(require_api_token)) -> dict:
+    question_keys = payload.questionKeys
+    if not question_keys and payload.questions:
+        question_keys = [q.questionKey for q in payload.questions]
+
+    stats = await database.query_openedu_v2_stats(payload.context.testKey, question_keys)
+    return {
+        'statsByQuestion': stats,
+        'buildKnown': _is_known_build_id(payload.client.buildId),
+        'parserKnown': _is_known_parser_version(payload.client.parserVersion),
+    }
+
+
+@app.get('/v2/users/me/stats')
+@app.get('/api/v2/users/me/stats')
+async def get_v2_me_stats(user_id: Optional[int] = Depends(require_api_token)) -> dict:
+    return {'ok': True, 'stats': await database.get_user_public_stats(user_id)}
+
+
 # ── Client logs (DB write retired, Telegram forwarding kept) ───────
 
 @app.post('/v1/logs/client')
 @app.post('/api/v1/logs/client')
-async def post_extension_log(payload: LogPayloadIn, user_id: int | None = Depends(require_api_token)) -> dict:
+async def post_extension_log(payload: LogPayloadIn, user_id: Optional[int] = Depends(require_api_token)) -> dict:
     serialized = payload.model_dump()
     spawn_forward(serialized['kind'], serialized['payload'], serialized['system'])
+    return {'ok': True}
+
+
+@app.post('/v2/logs/client')
+@app.post('/api/v2/logs/client')
+async def post_extension_log_v2(request: Request, payload: LogPayloadV2In, user_id: Optional[int] = Depends(require_api_token)) -> dict:
+    serialized = payload.model_dump()
+    await database.write_client_log_v2(serialized, user_id=user_id)
+    spawn_forward_v2(
+        serialized['kind'],
+        serialized.get('payload') or {},
+        serialized.get('system') or {},
+        serialized.get('client') or {},
+        {
+            'user_id': user_id,
+            'auth_type': getattr(request.state, 'auth_token_type', ''),
+            'severity': serialized.get('severity') or 'error',
+        },
+    )
     return {'ok': True}

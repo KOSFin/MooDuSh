@@ -49,18 +49,16 @@
 
 ### Шаг 1: Скачайте расширение
 
-**Вариант А — через Git:**
+Откройте последний **GitHub Release** и скачайте `moodush-extension.zip`. Распакуйте архив в удобное место.
+
+Для разработки можно клонировать репозиторий:
 
 ```bash
 git clone https://github.com/KOSFin/MooDuSh-from-syncshare.git
 cd MooDuSh-from-syncshare
+npm ci
+npm run build:extension
 ```
-
-**Вариант Б — ZIP-архив:**
-
-1. На странице репозитория нажмите зеленую кнопку **Code**
-2. Выберите **Download ZIP**
-3. Распакуйте архив в удобное место
 
 ### Шаг 2: Загрузите в Chrome
 
@@ -76,21 +74,19 @@ cd MooDuSh-from-syncshare
 
 ## Обновление
 
-Если расширение скачано через Git, обновите его одной командой:
+Если расширение установлено как unpacked-папка, обновите его внешним скриптом:
 
 ```bash
 ./scripts/update.sh
 ```
 
-Или вручную:
+На Windows:
 
-```bash
-git pull --ff-only
+```powershell
+.\scripts\update.ps1
 ```
 
-После обновления откройте `chrome://extensions/` и нажмите кнопку обновления у MooDuSh.
-
-Если расширение скачано ZIP-архивом, скачайте новый ZIP и замените старую папку. Если вы запускали свой бэкенд, сохраните `.env` перед заменой.
+После обновления откройте `chrome://extensions/` и нажмите кнопку обновления у MooDuSh. Само расширение не перезаписывает свою папку из Chrome — это делает только внешний скрипт, запущенный пользователем.
 
 ---
 
@@ -106,13 +102,11 @@ git pull --ff-only
 
 ### Шаг 2: Настройте расширение
 
-1. Нажмите на иконку MooDuSh на панели расширений Chrome
-2. Переключитесь на вкладку **OpenEdu**
-3. Внизу нажмите кнопку **Настройки API**
-4. Перейдите на вкладку **API OpenEdu**
-5. В поле **Bearer токен** вставьте скопированный токен
-6. Нажмите **Проверить API** — статус должен стать **Онлайн**
-7. Нажмите **Сохранить**
+1. Нажмите на иконку MooDuSh на панели Chrome
+2. Примите политику в первом экране popup
+3. Вставьте токен в поле подключения
+4. При необходимости включите **Использовать свой backend** и измените URL
+5. Нажмите **Проверить** — статус должен стать **Онлайн**
 
 ### Шаг 3: Используйте на сайте
 
@@ -157,7 +151,36 @@ TELEGRAM_BOT_TOKEN=123456:telegram_bot_token
 BOT_LINK=https://t.me/moodush_bot
 ```
 
-Админ-панель открывается по адресу `/admin`. Вход теперь работает через форму и cookie-сессию: токен администратора больше не нужно передавать в URL. В панели доступны обзор, пользователи, статистика, тесты и вопросы.
+
+---
+
+## GitHub Actions и релизы
+
+Workflow `.github/workflows/extension.yml` гоняет тесты, собирает `moodush-extension.zip` и публикует Release только по tag `v*` или ручному запуску.
+
+### Repository Variables
+
+| Variable | Пример | Назначение |
+|----------|--------|------------|
+| `OPENEDU_API_BASE_URL` | `https://paramext.ruka.me/api` | Публичный URL OpenEdu backend для popup/build config |
+| `MOODLE_API_BASE_URL` | `https://syncshare.naloaty.me/api` | Публичный URL Moodle backend |
+| `BOT_LINK` | `https://t.me/moodush_bot` | Ссылка на Telegram-бота для получения ключа |
+| `UPDATE_CHECK_URL` | `https://paramext.ruka.me/api/v2/update` | Endpoint проверки обновлений |
+| `RELEASE_PUBLIC_KEY` | публичный PEM/ключ | Публичный ключ проверки release manifest |
+
+### Repository Secrets
+
+| Secret | Назначение |
+|--------|------------|
+| `RELEASE_SIGNING_PRIVATE_KEY` | Приватный ключ для подписи `release-manifest.json` |
+
+Во frontend build config нельзя добавлять секретные API-токены: все, что попадает в `js/build_config.js`, видно пользователю расширения.
+
+---
+
+## OpenEdu V2 parsing tests
+
+Локально `npm test` дополнительно прогоняет HTML из `test-files/*.html`, если папка есть. Raw HAR/HTML могут содержать чувствительные данные, поэтому перед добавлением в репозиторий их нужно санитизировать. В CI есть fallback-fixtures, чтобы базовые тесты parser/course map работали без приватных файлов.
 
 ---
 

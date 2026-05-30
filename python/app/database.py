@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import html
@@ -424,6 +426,204 @@ class Database:
                     ON openedu_answer_stats (test_key, question_key, answer_norm) WHERE answer_norm != ''
                 """
             )
+
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS openedu_v2_courses (
+                    course_id TEXT PRIMARY KEY,
+                    host TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_chapters (
+                    course_id TEXT NOT NULL,
+                    chapter_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    order_index INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (course_id, chapter_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_sequentials (
+                    course_id TEXT NOT NULL,
+                    chapter_id TEXT NOT NULL DEFAULT '',
+                    sequential_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    order_index INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (course_id, sequential_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_verticals (
+                    course_id TEXT NOT NULL,
+                    chapter_id TEXT NOT NULL DEFAULT '',
+                    sequential_id TEXT NOT NULL DEFAULT '',
+                    vertical_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    order_index INTEGER NOT NULL DEFAULT 0,
+                    graded BOOLEAN NOT NULL DEFAULT FALSE,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (course_id, vertical_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_tests (
+                    test_key TEXT PRIMARY KEY,
+                    host TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    course_id TEXT NOT NULL DEFAULT '',
+                    chapter_id TEXT NOT NULL DEFAULT '',
+                    sequential_id TEXT NOT NULL DEFAULT '',
+                    vertical_id TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_frames (
+                    frame_key TEXT PRIMARY KEY,
+                    test_key TEXT NOT NULL DEFAULT '',
+                    course_id TEXT NOT NULL DEFAULT '',
+                    chapter_id TEXT NOT NULL DEFAULT '',
+                    sequential_id TEXT NOT NULL DEFAULT '',
+                    vertical_id TEXT NOT NULL DEFAULT '',
+                    problem_id TEXT NOT NULL DEFAULT '',
+                    frame_url TEXT NOT NULL DEFAULT '',
+                    parser_version TEXT NOT NULL DEFAULT '',
+                    parser_source TEXT NOT NULL DEFAULT '',
+                    question_count INTEGER NOT NULL DEFAULT 0,
+                    parse_confidence DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_questions (
+                    test_key TEXT NOT NULL,
+                    question_key TEXT NOT NULL,
+                    course_id TEXT NOT NULL DEFAULT '',
+                    chapter_id TEXT NOT NULL DEFAULT '',
+                    sequential_id TEXT NOT NULL DEFAULT '',
+                    vertical_id TEXT NOT NULL DEFAULT '',
+                    problem_id TEXT NOT NULL DEFAULT '',
+                    prompt TEXT NOT NULL DEFAULT '',
+                    prompt_norm TEXT NOT NULL DEFAULT '',
+                    question_type TEXT NOT NULL DEFAULT 'unknown',
+                    question_fingerprint TEXT NOT NULL DEFAULT '',
+                    extension_version TEXT NOT NULL DEFAULT '',
+                    build_id TEXT NOT NULL DEFAULT '',
+                    parser_version TEXT NOT NULL DEFAULT '',
+                    parser_source TEXT NOT NULL DEFAULT '',
+                    raw_type TEXT NOT NULL DEFAULT '',
+                    parse_confidence DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    completed_count BIGINT NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (test_key, question_key)
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_answers (
+                    test_key TEXT NOT NULL,
+                    question_key TEXT NOT NULL,
+                    answer_key TEXT NOT NULL,
+                    answer_text TEXT NOT NULL DEFAULT '',
+                    answer_norm TEXT NOT NULL DEFAULT '',
+                    answer_fingerprint TEXT NOT NULL DEFAULT '',
+                    extension_version TEXT NOT NULL DEFAULT '',
+                    build_id TEXT NOT NULL DEFAULT '',
+                    parser_version TEXT NOT NULL DEFAULT '',
+                    verified_count BIGINT NOT NULL DEFAULT 0,
+                    incorrect_count BIGINT NOT NULL DEFAULT 0,
+                    fallback_count BIGINT NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (test_key, question_key, answer_key)
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_participant_question_state (
+                    test_key TEXT NOT NULL,
+                    participant_key TEXT NOT NULL,
+                    question_key TEXT NOT NULL,
+                    user_id BIGINT DEFAULT NULL,
+                    selected_answer_keys TEXT[] NOT NULL DEFAULT '{}',
+                    verified_answer_keys TEXT[] NOT NULL DEFAULT '{}',
+                    incorrect_answer_keys TEXT[] NOT NULL DEFAULT '{}',
+                    is_correct BOOLEAN NOT NULL DEFAULT FALSE,
+                    extension_version TEXT NOT NULL DEFAULT '',
+                    build_id TEXT NOT NULL DEFAULT '',
+                    parser_version TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (test_key, participant_key, question_key)
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_attempts (
+                    id BIGSERIAL PRIMARY KEY,
+                    test_key TEXT NOT NULL,
+                    user_id BIGINT DEFAULT NULL,
+                    completed BOOLEAN NOT NULL DEFAULT FALSE,
+                    source TEXT NOT NULL DEFAULT 'extension',
+                    fingerprint TEXT NOT NULL DEFAULT '',
+                    extension_version TEXT NOT NULL DEFAULT '',
+                    build_id TEXT NOT NULL DEFAULT '',
+                    parser_version TEXT NOT NULL DEFAULT '',
+                    platform TEXT NOT NULL DEFAULT 'openedu',
+                    client_id TEXT NOT NULL DEFAULT '',
+                    session_id TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS openedu_v2_parse_reports (
+                    id BIGSERIAL PRIMARY KEY,
+                    test_key TEXT NOT NULL DEFAULT '',
+                    question_key TEXT NOT NULL DEFAULT '',
+                    course_id TEXT NOT NULL DEFAULT '',
+                    vertical_id TEXT NOT NULL DEFAULT '',
+                    reason TEXT NOT NULL DEFAULT '',
+                    prompt_preview TEXT NOT NULL DEFAULT '',
+                    question_type TEXT NOT NULL DEFAULT 'unknown',
+                    parser_version TEXT NOT NULL DEFAULT '',
+                    parser_source TEXT NOT NULL DEFAULT '',
+                    parse_confidence DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS client_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT DEFAULT NULL,
+                    kind TEXT NOT NULL,
+                    severity TEXT NOT NULL DEFAULT 'error',
+                    platform TEXT NOT NULL DEFAULT '',
+                    extension_version TEXT NOT NULL DEFAULT '',
+                    build_id TEXT NOT NULL DEFAULT '',
+                    parser_version TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL DEFAULT '',
+                    url TEXT NOT NULL DEFAULT '',
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    system JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_openedu_v2_tests_course ON openedu_v2_tests (course_id, chapter_id, sequential_id, vertical_id);
+                CREATE INDEX IF NOT EXISTS idx_openedu_v2_questions_course ON openedu_v2_questions (course_id, chapter_id, sequential_id, vertical_id);
+                CREATE INDEX IF NOT EXISTS idx_openedu_v2_questions_fingerprint ON openedu_v2_questions (test_key, question_fingerprint) WHERE question_fingerprint != '';
+                CREATE INDEX IF NOT EXISTS idx_openedu_v2_answers_norm ON openedu_v2_answers (test_key, question_key, answer_norm) WHERE answer_norm != '';
+                CREATE INDEX IF NOT EXISTS idx_openedu_v2_attempts_test ON openedu_v2_attempts (test_key, created_at DESC);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_openedu_v2_attempts_fingerprint ON openedu_v2_attempts (fingerprint) WHERE fingerprint != '';
+                CREATE INDEX IF NOT EXISTS idx_client_logs_user_created ON client_logs (user_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_client_logs_kind_created ON client_logs (kind, created_at DESC);
+                """
+            )
+
+            for stmt in [
+                "ALTER TABLE openedu_v2_questions ADD COLUMN IF NOT EXISTS extension_version TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE openedu_v2_questions ADD COLUMN IF NOT EXISTS build_id TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE openedu_v2_questions ADD COLUMN IF NOT EXISTS parser_version TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE openedu_v2_answers ADD COLUMN IF NOT EXISTS extension_version TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE openedu_v2_answers ADD COLUMN IF NOT EXISTS build_id TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE openedu_v2_answers ADD COLUMN IF NOT EXISTS parser_version TEXT NOT NULL DEFAULT ''",
+            ]:
+                await conn.execute(stmt)
 
         await self.repair_openedu_data()
 
@@ -1389,6 +1589,451 @@ class Database:
                         question_correct, user_id,
                     )
 
+    # ── OpenEdu V2 attempts ───────────────────────────────────────
+
+    def _v2_question_quarantine_reason(self, question: dict[str, Any], answer_texts: list[str]) -> str:
+        prompt = collapse_whitespace(question.get('prompt', ''))
+        confidence = float(question.get('parseConfidence') or 0)
+        question_type = str(question.get('questionType') or 'unknown').strip().lower()
+        if not prompt:
+            return 'empty_prompt'
+        if len(prompt) > 12000:
+            return 'prompt_too_large'
+        if question_type in {'', 'unknown', 'unsupported'}:
+            return 'unknown_question_type'
+        if confidence < 0.45:
+            return 'low_confidence'
+        if len(answer_texts) > 80:
+            return 'too_many_answers'
+        return ''
+
+    @staticmethod
+    def _safe_json(value: Any) -> str:
+        return json.dumps(value or {}, ensure_ascii=False, sort_keys=True, default=str)
+
+    async def _upsert_openedu_v2_hierarchy(self, conn, context: dict[str, Any], course: dict[str, Any]) -> None:
+        course_id = str(course.get('courseId') or context.get('courseId') or '').strip()
+        if not course_id:
+            return
+
+        await conn.execute(
+            """
+            INSERT INTO openedu_v2_courses (course_id, host, title, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (course_id)
+            DO UPDATE SET host = COALESCE(NULLIF(EXCLUDED.host, ''), openedu_v2_courses.host),
+                          title = COALESCE(NULLIF(EXCLUDED.title, ''), openedu_v2_courses.title),
+                          updated_at = NOW()
+            """,
+            course_id,
+            str(context.get('host') or ''),
+            str(course.get('courseTitle') or context.get('title') or ''),
+        )
+
+        chapter_id = str(course.get('chapterId') or '').strip()
+        if chapter_id:
+            await conn.execute(
+                """
+                INSERT INTO openedu_v2_chapters (course_id, chapter_id, title, updated_at)
+                VALUES ($1, $2, $3, NOW())
+                ON CONFLICT (course_id, chapter_id)
+                DO UPDATE SET title = COALESCE(NULLIF(EXCLUDED.title, ''), openedu_v2_chapters.title),
+                              updated_at = NOW()
+                """,
+                course_id,
+                chapter_id,
+                str(course.get('chapterTitle') or ''),
+            )
+
+        sequential_id = str(course.get('sequentialId') or '').strip()
+        if sequential_id:
+            await conn.execute(
+                """
+                INSERT INTO openedu_v2_sequentials (course_id, chapter_id, sequential_id, title, updated_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (course_id, sequential_id)
+                DO UPDATE SET chapter_id = COALESCE(NULLIF(EXCLUDED.chapter_id, ''), openedu_v2_sequentials.chapter_id),
+                              title = COALESCE(NULLIF(EXCLUDED.title, ''), openedu_v2_sequentials.title),
+                              updated_at = NOW()
+                """,
+                course_id,
+                chapter_id,
+                sequential_id,
+                str(course.get('sequentialTitle') or ''),
+            )
+
+        vertical_id = str(course.get('verticalId') or '').strip()
+        if vertical_id:
+            await conn.execute(
+                """
+                INSERT INTO openedu_v2_verticals (course_id, chapter_id, sequential_id, vertical_id, title, updated_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (course_id, vertical_id)
+                DO UPDATE SET chapter_id = COALESCE(NULLIF(EXCLUDED.chapter_id, ''), openedu_v2_verticals.chapter_id),
+                              sequential_id = COALESCE(NULLIF(EXCLUDED.sequential_id, ''), openedu_v2_verticals.sequential_id),
+                              title = COALESCE(NULLIF(EXCLUDED.title, ''), openedu_v2_verticals.title),
+                              updated_at = NOW()
+                """,
+                course_id,
+                chapter_id,
+                sequential_id,
+                vertical_id,
+                str(course.get('verticalTitle') or ''),
+            )
+
+    async def upsert_openedu_v2_attempt(self, payload: dict[str, Any], user_id: int | None = None) -> dict[str, int]:
+        assert self.pool is not None
+        context = payload['context']
+        client = payload.get('client') or {}
+        questions = payload.get('questions', [])
+        completed = bool(payload.get('completed', False))
+        participant_key = str(context.get('participantKey') or '').strip() or 'anonymous'
+        actor_key = f'user:{user_id}' if user_id is not None else f'participant:{participant_key}'
+        fingerprint = self._compute_attempt_fingerprint(context, questions, actor_key)
+        accepted = 0
+        quarantined = 0
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                first_course = (questions[0].get('course') if questions else {}) or {}
+                await self._upsert_openedu_v2_hierarchy(conn, context, first_course)
+                await conn.execute(
+                    """
+                    INSERT INTO openedu_v2_tests
+                        (test_key, host, path, title, course_id, chapter_id, sequential_id, vertical_id, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                    ON CONFLICT (test_key)
+                    DO UPDATE SET host = EXCLUDED.host,
+                                  path = EXCLUDED.path,
+                                  title = COALESCE(NULLIF(EXCLUDED.title, ''), openedu_v2_tests.title),
+                                  course_id = COALESCE(NULLIF(EXCLUDED.course_id, ''), openedu_v2_tests.course_id),
+                                  chapter_id = COALESCE(NULLIF(EXCLUDED.chapter_id, ''), openedu_v2_tests.chapter_id),
+                                  sequential_id = COALESCE(NULLIF(EXCLUDED.sequential_id, ''), openedu_v2_tests.sequential_id),
+                                  vertical_id = COALESCE(NULLIF(EXCLUDED.vertical_id, ''), openedu_v2_tests.vertical_id),
+                                  updated_at = NOW()
+                    """,
+                    context['testKey'],
+                    context['host'],
+                    context['path'],
+                    context.get('title', ''),
+                    first_course.get('courseId', ''),
+                    first_course.get('chapterId', ''),
+                    first_course.get('sequentialId', ''),
+                    first_course.get('verticalId', ''),
+                )
+
+                inserted_attempt = await conn.fetchval(
+                    """
+                    INSERT INTO openedu_v2_attempts
+                        (test_key, completed, source, fingerprint, user_id, extension_version, build_id, parser_version, platform, client_id, session_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    ON CONFLICT DO NOTHING
+                    RETURNING id
+                    """,
+                    context['testKey'],
+                    completed,
+                    str(payload.get('source') or 'extension'),
+                    fingerprint,
+                    user_id,
+                    str(client.get('extensionVersion') or ''),
+                    str(client.get('buildId') or ''),
+                    str(client.get('parserVersion') or ''),
+                    str(client.get('platform') or 'openedu'),
+                    str(client.get('clientId') or ''),
+                    str(client.get('sessionId') or ''),
+                )
+                if not inserted_attempt:
+                    return {'accepted': 0, 'quarantined': 0, 'duplicate': 1}
+
+                for question in questions:
+                    question_key = str(question.get('questionKey') or '').strip()
+                    if not question_key:
+                        continue
+
+                    course = question.get('course') or {}
+                    await self._upsert_openedu_v2_hierarchy(conn, context, course)
+                    answers = question.get('answers', [])
+                    raw_answer_entries = []
+                    for answer in answers:
+                        answer_key = str(answer.get('answerKey') or answer.get('answerFingerprint') or '').strip()
+                        if not answer_key:
+                            continue
+                        answer_text = sanitize_answer_text(str(answer.get('answerText') or ''))
+                        raw_answer_entries.append({
+                            'answer_key': answer_key,
+                            'answer_text': answer_text,
+                            'answer_norm': normalize_answer_text(answer_text),
+                            'answer_fingerprint': str(answer.get('answerFingerprint') or ''),
+                            'selected': bool(answer.get('selected')),
+                            'correct': bool(answer.get('correct')),
+                            'incorrect': bool(answer.get('incorrect')),
+                            'input_type': str(answer.get('inputType') or ''),
+                        })
+
+                    answer_texts = [
+                        entry['answer_text']
+                        for entry in raw_answer_entries
+                        if entry['answer_text'] and entry['input_type'] != 'text'
+                    ]
+                    prompt_raw = sanitize_question_prompt(str(question.get('prompt') or ''), answer_texts)
+                    question['prompt'] = prompt_raw
+                    quarantine_reason = self._v2_question_quarantine_reason(question, answer_texts)
+                    if quarantine_reason:
+                        quarantined += 1
+                        await conn.execute(
+                            """
+                            INSERT INTO openedu_v2_parse_reports
+                                (test_key, question_key, course_id, vertical_id, reason, prompt_preview, question_type, parser_version, parser_source, parse_confidence, payload)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+                            """,
+                            context['testKey'],
+                            question_key,
+                            str(course.get('courseId') or ''),
+                            str(course.get('verticalId') or ''),
+                            quarantine_reason,
+                            prompt_raw[:500],
+                            str(question.get('questionType') or 'unknown'),
+                            str(client.get('parserVersion') or ''),
+                            str(question.get('parserSource') or ''),
+                            float(question.get('parseConfidence') or 0),
+                            self._safe_json({'question': question, 'client': client}),
+                        )
+                        continue
+
+                    accepted += 1
+                    question_correct = bool(question.get('isCorrect'))
+                    selected_keys = {entry['answer_key'] for entry in raw_answer_entries if entry['selected']}
+                    current_verified = {
+                        entry['answer_key'] for entry in raw_answer_entries
+                        if question_correct and entry['selected'] and entry['correct']
+                    }
+                    current_incorrect = {
+                        entry['answer_key'] for entry in raw_answer_entries
+                        if entry['selected'] and entry['incorrect']
+                    }
+
+                    previous_state = await conn.fetchrow(
+                        """
+                        SELECT verified_answer_keys, incorrect_answer_keys, is_correct
+                        FROM openedu_v2_participant_question_state
+                        WHERE test_key = $1 AND participant_key = $2 AND question_key = $3
+                        """,
+                        context['testKey'],
+                        participant_key,
+                        question_key,
+                    )
+                    prev_verified = set(previous_state['verified_answer_keys'] or []) if previous_state else set()
+                    prev_incorrect = set(previous_state['incorrect_answer_keys'] or []) if previous_state else set()
+                    prev_correct = bool(previous_state['is_correct']) if previous_state else False
+                    verified_keys = current_verified | prev_verified
+                    incorrect_keys = current_incorrect | prev_incorrect
+                    if prev_correct:
+                        question_correct = True
+                    completed_delta = 1 if question_correct and not prev_correct else 0
+
+                    await conn.execute(
+                        """
+                        INSERT INTO openedu_v2_questions
+                            (test_key, question_key, course_id, chapter_id, sequential_id, vertical_id, problem_id, prompt, prompt_norm,
+                             question_type, question_fingerprint, extension_version, build_id, parser_version, parser_source, raw_type, parse_confidence, completed_count, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
+                        ON CONFLICT (test_key, question_key)
+                        DO UPDATE SET prompt = COALESCE(NULLIF(EXCLUDED.prompt, ''), openedu_v2_questions.prompt),
+                                      prompt_norm = COALESCE(NULLIF(EXCLUDED.prompt_norm, ''), openedu_v2_questions.prompt_norm),
+                                      question_type = COALESCE(NULLIF(EXCLUDED.question_type, ''), openedu_v2_questions.question_type),
+                                      question_fingerprint = COALESCE(NULLIF(EXCLUDED.question_fingerprint, ''), openedu_v2_questions.question_fingerprint),
+                                      extension_version = COALESCE(NULLIF(EXCLUDED.extension_version, ''), openedu_v2_questions.extension_version),
+                                      build_id = COALESCE(NULLIF(EXCLUDED.build_id, ''), openedu_v2_questions.build_id),
+                                      parser_version = COALESCE(NULLIF(EXCLUDED.parser_version, ''), openedu_v2_questions.parser_version),
+                                      parser_source = COALESCE(NULLIF(EXCLUDED.parser_source, ''), openedu_v2_questions.parser_source),
+                                      parse_confidence = GREATEST(openedu_v2_questions.parse_confidence, EXCLUDED.parse_confidence),
+                                      completed_count = openedu_v2_questions.completed_count + $18,
+                                      updated_at = NOW()
+                        """,
+                        context['testKey'],
+                        question_key,
+                        str(course.get('courseId') or ''),
+                        str(course.get('chapterId') or ''),
+                        str(course.get('sequentialId') or ''),
+                        str(course.get('verticalId') or ''),
+                        str(course.get('problemId') or ''),
+                        prompt_raw,
+                        normalize_prompt(prompt_raw),
+                        str(question.get('questionType') or 'unknown'),
+                        str(question.get('questionFingerprint') or '') or compute_question_fingerprint(prompt_raw, answer_texts),
+                        str(client.get('extensionVersion') or ''),
+                        str(client.get('buildId') or ''),
+                        str(client.get('parserVersion') or ''),
+                        str(question.get('parserSource') or ''),
+                        str(question.get('rawType') or ''),
+                        float(question.get('parseConfidence') or 0),
+                        completed_delta,
+                    )
+
+                    for entry in raw_answer_entries:
+                        selected_inc = 1 if entry['answer_key'] in selected_keys else 0
+                        verified_inc = 1 if entry['answer_key'] in current_verified else 0
+                        incorrect_inc = 1 if entry['answer_key'] in current_incorrect else 0
+                        if selected_inc == 0 and verified_inc == 0 and incorrect_inc == 0:
+                            continue
+                        await conn.execute(
+                            """
+                            INSERT INTO openedu_v2_answers
+                                (test_key, question_key, answer_key, answer_text, answer_norm, answer_fingerprint,
+                                 extension_version, build_id, parser_version, verified_count, incorrect_count, fallback_count, updated_at)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+                            ON CONFLICT (test_key, question_key, answer_key)
+                            DO UPDATE SET answer_text = COALESCE(NULLIF(EXCLUDED.answer_text, ''), openedu_v2_answers.answer_text),
+                                          answer_norm = COALESCE(NULLIF(EXCLUDED.answer_norm, ''), openedu_v2_answers.answer_norm),
+                                          answer_fingerprint = COALESCE(NULLIF(EXCLUDED.answer_fingerprint, ''), openedu_v2_answers.answer_fingerprint),
+                                          extension_version = COALESCE(NULLIF(EXCLUDED.extension_version, ''), openedu_v2_answers.extension_version),
+                                          build_id = COALESCE(NULLIF(EXCLUDED.build_id, ''), openedu_v2_answers.build_id),
+                                          parser_version = COALESCE(NULLIF(EXCLUDED.parser_version, ''), openedu_v2_answers.parser_version),
+                                          verified_count = openedu_v2_answers.verified_count + EXCLUDED.verified_count,
+                                          incorrect_count = openedu_v2_answers.incorrect_count + EXCLUDED.incorrect_count,
+                                          fallback_count = openedu_v2_answers.fallback_count + EXCLUDED.fallback_count,
+                                          updated_at = NOW()
+                            """,
+                            context['testKey'],
+                            question_key,
+                            entry['answer_key'],
+                            entry['answer_text'],
+                            entry['answer_norm'],
+                            entry['answer_fingerprint'],
+                            str(client.get('extensionVersion') or ''),
+                            str(client.get('buildId') or ''),
+                            str(client.get('parserVersion') or ''),
+                            verified_inc,
+                            incorrect_inc,
+                            selected_inc,
+                        )
+
+                    await conn.execute(
+                        """
+                        INSERT INTO openedu_v2_participant_question_state
+                            (test_key, participant_key, question_key, user_id, selected_answer_keys, verified_answer_keys,
+                             incorrect_answer_keys, is_correct, extension_version, build_id, parser_version, updated_at)
+                        VALUES ($1, $2, $3, $4, $5::text[], $6::text[], $7::text[], $8, $9, $10, $11, NOW())
+                        ON CONFLICT (test_key, participant_key, question_key)
+                        DO UPDATE SET selected_answer_keys = EXCLUDED.selected_answer_keys,
+                                      verified_answer_keys = EXCLUDED.verified_answer_keys,
+                                      incorrect_answer_keys = EXCLUDED.incorrect_answer_keys,
+                                      is_correct = EXCLUDED.is_correct,
+                                      user_id = COALESCE(EXCLUDED.user_id, openedu_v2_participant_question_state.user_id),
+                                      extension_version = EXCLUDED.extension_version,
+                                      build_id = EXCLUDED.build_id,
+                                      parser_version = EXCLUDED.parser_version,
+                                      updated_at = NOW()
+                        """,
+                        context['testKey'],
+                        participant_key,
+                        question_key,
+                        user_id,
+                        sorted(selected_keys),
+                        sorted(verified_keys),
+                        sorted(incorrect_keys),
+                        question_correct,
+                        str(client.get('extensionVersion') or ''),
+                        str(client.get('buildId') or ''),
+                        str(client.get('parserVersion') or ''),
+                    )
+
+        return {'accepted': accepted, 'quarantined': quarantined, 'duplicate': 0}
+
+    async def query_openedu_v2_stats(self, test_key: str, question_keys: list[str]) -> dict[str, Any]:
+        assert self.pool is not None
+        if not question_keys:
+            return {}
+        async with self.pool.acquire() as conn:
+            question_rows = await conn.fetch(
+                "SELECT question_key, completed_count FROM openedu_v2_questions WHERE test_key = $1 AND question_key = ANY($2::text[])",
+                test_key,
+                question_keys,
+            )
+            stat_rows = await conn.fetch(
+                """
+                SELECT question_key, answer_key, answer_text, verified_count, incorrect_count, fallback_count
+                FROM openedu_v2_answers
+                WHERE test_key = $1 AND question_key = ANY($2::text[])
+                ORDER BY question_key, verified_count DESC, incorrect_count DESC, fallback_count DESC
+                """,
+                test_key,
+                question_keys,
+            )
+
+        completed_map = {row['question_key']: int(row['completed_count']) for row in question_rows}
+        result = {
+            qk: {'completedCount': completed_map.get(qk, 0), 'verifiedAnswers': [], 'incorrectAnswers': [], 'fallbackAnswers': []}
+            for qk in question_keys
+        }
+        for row in stat_rows:
+            entry = result.get(row['question_key'])
+            if not entry:
+                continue
+            v = int(row['verified_count'])
+            i = int(row['incorrect_count'])
+            f = int(row['fallback_count'])
+            if v > 0:
+                entry['verifiedAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': v})
+            if i > 0:
+                entry['incorrectAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': i})
+            if f > 0:
+                entry['fallbackAnswers'].append({'answerKey': row['answer_key'], 'answerText': row['answer_text'], 'count': f})
+        return result
+
+    async def write_client_log_v2(self, payload: dict[str, Any], user_id: int | None = None) -> None:
+        assert self.pool is not None
+        client = payload.get('client') or {}
+        system = payload.get('system') or {}
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO client_logs
+                    (user_id, kind, severity, platform, extension_version, build_id, parser_version, scope, url, payload, system)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb)
+                """,
+                user_id,
+                str(payload.get('kind') or ''),
+                str(payload.get('severity') or 'error'),
+                str(client.get('platform') or ''),
+                str(client.get('extensionVersion') or ''),
+                str(client.get('buildId') or ''),
+                str(client.get('parserVersion') or ''),
+                str(system.get('scope') or ''),
+                str(system.get('url') or ''),
+                self._safe_json(payload.get('payload') or {}),
+                self._safe_json(system),
+            )
+
+    async def get_user_public_stats(self, user_id: int | None) -> dict[str, Any]:
+        assert self.pool is not None
+        if user_id is None:
+            return {'tests': 0, 'courses': 0, 'questions': 0, 'completions': 0, 'attempts': 0}
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(DISTINCT ps.test_key) AS tests,
+                    COUNT(DISTINCT q.course_id) FILTER (WHERE q.course_id != '') AS courses,
+                    COUNT(*) AS questions,
+                    COUNT(*) FILTER (WHERE ps.is_correct) AS completions,
+                    (SELECT COUNT(*) FROM openedu_v2_attempts WHERE user_id = $1) AS attempts
+                FROM openedu_v2_participant_question_state ps
+                LEFT JOIN openedu_v2_questions q
+                    ON q.test_key = ps.test_key
+                    AND q.question_key = ps.question_key
+                WHERE ps.user_id = $1
+                """,
+                user_id,
+            )
+        return {
+            'tests': int(row['tests'] or 0) if row else 0,
+            'courses': int(row['courses'] or 0) if row else 0,
+            'questions': int(row['questions'] or 0) if row else 0,
+            'completions': int(row['completions'] or 0) if row else 0,
+            'attempts': int(row['attempts'] or 0) if row else 0,
+        }
+
     # ── Stats query ────────────────────────────────────────────────
 
     async def query_openedu_stats(self, test_key: str, question_keys: list[str]) -> dict[str, Any]:
@@ -1734,7 +2379,12 @@ class Database:
                     (SELECT COUNT(*) FROM openedu_attempts WHERE created_at > NOW() - INTERVAL '24 hours') AS attempts_24h,
                     (SELECT COALESCE(SUM(verified_count), 0) FROM openedu_answer_stats) AS verified_answers_count,
                     (SELECT COALESCE(SUM(incorrect_count), 0) FROM openedu_answer_stats) AS incorrect_answers_count,
-                    (SELECT COALESCE(SUM(fallback_count), 0) FROM openedu_answer_stats) AS fallback_answers_count
+                    (SELECT COALESCE(SUM(fallback_count), 0) FROM openedu_answer_stats) AS fallback_answers_count,
+                    (SELECT COUNT(*) FROM openedu_v2_courses) AS v2_courses_count,
+                    (SELECT COUNT(*) FROM openedu_v2_tests) AS v2_tests_count,
+                    (SELECT COUNT(*) FROM openedu_v2_questions) AS v2_questions_count,
+                    (SELECT COUNT(*) FROM openedu_v2_attempts) AS v2_attempts_count,
+                    (SELECT COUNT(*) FROM openedu_v2_parse_reports) AS v2_parse_reports_count
                 """
             )
             top_tests = await conn.fetch(
@@ -1773,6 +2423,158 @@ class Database:
             'top_tests': [dict(r) for r in top_tests],
             'latest_users': [dict(r) for r in latest_users],
             'latest_attempts': [dict(r) for r in latest_attempts],
+        }
+
+    async def get_admin_v2_courses_page(self, search: str = '', limit: int = 50, offset: int = 0) -> dict[str, Any]:
+        assert self.pool is not None
+        needle = '%' + search.strip() + '%' if search.strip() else ''
+        async with self.pool.acquire() as conn:
+            if needle:
+                total = await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM openedu_v2_courses
+                    WHERE course_id ILIKE $1 OR title ILIKE $1 OR host ILIKE $1
+                    """,
+                    needle,
+                )
+                rows = await conn.fetch(
+                    """
+                    SELECT c.course_id, c.host, c.title, c.updated_at,
+                           COUNT(DISTINCT ch.chapter_id) AS chapter_count,
+                           COUNT(DISTINCT s.sequential_id) AS sequential_count,
+                           COUNT(DISTINCT v.vertical_id) AS vertical_count,
+                           COUNT(DISTINCT q.question_key) AS question_count,
+                           COUNT(DISTINCT a.id) AS attempt_count
+                    FROM openedu_v2_courses c
+                    LEFT JOIN openedu_v2_chapters ch ON ch.course_id = c.course_id
+                    LEFT JOIN openedu_v2_sequentials s ON s.course_id = c.course_id
+                    LEFT JOIN openedu_v2_verticals v ON v.course_id = c.course_id
+                    LEFT JOIN openedu_v2_questions q ON q.course_id = c.course_id
+                    LEFT JOIN openedu_v2_attempts a ON a.test_key IN (SELECT test_key FROM openedu_v2_tests WHERE course_id = c.course_id)
+                    WHERE c.course_id ILIKE $3 OR c.title ILIKE $3 OR c.host ILIKE $3
+                    GROUP BY c.course_id, c.host, c.title, c.updated_at
+                    ORDER BY c.updated_at DESC
+                    LIMIT $1 OFFSET $2
+                    """,
+                    limit, offset, needle,
+                )
+            else:
+                total = await conn.fetchval("SELECT COUNT(*) FROM openedu_v2_courses")
+                rows = await conn.fetch(
+                    """
+                    SELECT c.course_id, c.host, c.title, c.updated_at,
+                           COUNT(DISTINCT ch.chapter_id) AS chapter_count,
+                           COUNT(DISTINCT s.sequential_id) AS sequential_count,
+                           COUNT(DISTINCT v.vertical_id) AS vertical_count,
+                           COUNT(DISTINCT q.question_key) AS question_count,
+                           COUNT(DISTINCT a.id) AS attempt_count
+                    FROM openedu_v2_courses c
+                    LEFT JOIN openedu_v2_chapters ch ON ch.course_id = c.course_id
+                    LEFT JOIN openedu_v2_sequentials s ON s.course_id = c.course_id
+                    LEFT JOIN openedu_v2_verticals v ON v.course_id = c.course_id
+                    LEFT JOIN openedu_v2_questions q ON q.course_id = c.course_id
+                    LEFT JOIN openedu_v2_attempts a ON a.test_key IN (SELECT test_key FROM openedu_v2_tests WHERE course_id = c.course_id)
+                    GROUP BY c.course_id, c.host, c.title, c.updated_at
+                    ORDER BY c.updated_at DESC
+                    LIMIT $1 OFFSET $2
+                    """,
+                    limit, offset,
+                )
+        return {'total': int(total or 0), 'courses': [dict(r) for r in rows], 'search': search.strip()}
+
+    async def get_admin_v2_course_detail(self, course_id: str) -> dict[str, Any]:
+        assert self.pool is not None
+        async with self.pool.acquire() as conn:
+            course = await conn.fetchrow(
+                "SELECT * FROM openedu_v2_courses WHERE course_id = $1",
+                course_id,
+            )
+            if not course:
+                return {'course': None}
+            counters = await conn.fetchrow(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM openedu_v2_chapters WHERE course_id = $1) AS chapters,
+                    (SELECT COUNT(*) FROM openedu_v2_sequentials WHERE course_id = $1) AS sequentials,
+                    (SELECT COUNT(*) FROM openedu_v2_verticals WHERE course_id = $1) AS verticals,
+                    (SELECT COUNT(*) FROM openedu_v2_questions WHERE course_id = $1) AS questions,
+                    (SELECT COUNT(*) FROM openedu_v2_parse_reports WHERE course_id = $1) AS parse_reports
+                """,
+                course_id,
+            )
+            chapters = await conn.fetch(
+                """
+                SELECT ch.chapter_id, ch.title,
+                       COUNT(DISTINCT s.sequential_id) AS sequential_count,
+                       COUNT(DISTINCT v.vertical_id) AS vertical_count,
+                       COUNT(DISTINCT q.question_key) AS question_count
+                FROM openedu_v2_chapters ch
+                LEFT JOIN openedu_v2_sequentials s ON s.course_id = ch.course_id AND s.chapter_id = ch.chapter_id
+                LEFT JOIN openedu_v2_verticals v ON v.course_id = ch.course_id AND v.chapter_id = ch.chapter_id
+                LEFT JOIN openedu_v2_questions q ON q.course_id = ch.course_id AND q.chapter_id = ch.chapter_id
+                WHERE ch.course_id = $1
+                GROUP BY ch.chapter_id, ch.title, ch.order_index
+                ORDER BY ch.order_index, ch.title, ch.chapter_id
+                """,
+                course_id,
+            )
+            sequentials = await conn.fetch(
+                """
+                SELECT s.chapter_id, s.sequential_id, s.title,
+                       COUNT(DISTINCT v.vertical_id) AS vertical_count,
+                       COUNT(DISTINCT q.question_key) AS question_count
+                FROM openedu_v2_sequentials s
+                LEFT JOIN openedu_v2_verticals v ON v.course_id = s.course_id AND v.sequential_id = s.sequential_id
+                LEFT JOIN openedu_v2_questions q ON q.course_id = s.course_id AND q.sequential_id = s.sequential_id
+                WHERE s.course_id = $1
+                GROUP BY s.chapter_id, s.sequential_id, s.title, s.order_index
+                ORDER BY s.order_index, s.title, s.sequential_id
+                """,
+                course_id,
+            )
+            verticals = await conn.fetch(
+                """
+                SELECT v.chapter_id, v.sequential_id, v.vertical_id, v.title,
+                       COUNT(DISTINCT q.question_key) AS question_count,
+                       COUNT(DISTINCT t.test_key) AS test_count
+                FROM openedu_v2_verticals v
+                LEFT JOIN openedu_v2_questions q ON q.course_id = v.course_id AND q.vertical_id = v.vertical_id
+                LEFT JOIN openedu_v2_tests t ON t.course_id = v.course_id AND t.vertical_id = v.vertical_id
+                WHERE v.course_id = $1
+                GROUP BY v.chapter_id, v.sequential_id, v.vertical_id, v.title, v.order_index
+                ORDER BY v.order_index, v.title, v.vertical_id
+                """,
+                course_id,
+            )
+            recent_questions = await conn.fetch(
+                """
+                SELECT question_key, prompt, question_type, parse_confidence, vertical_id, updated_at, completed_count
+                FROM openedu_v2_questions
+                WHERE course_id = $1
+                ORDER BY updated_at DESC
+                LIMIT 50
+                """,
+                course_id,
+            )
+            reports = await conn.fetch(
+                """
+                SELECT id, question_key, vertical_id, reason, prompt_preview, question_type, parse_confidence, created_at
+                FROM openedu_v2_parse_reports
+                WHERE course_id = $1
+                ORDER BY created_at DESC
+                LIMIT 40
+                """,
+                course_id,
+            )
+        return {
+            'course': dict(course),
+            'counters': dict(counters or {}),
+            'chapters': [dict(r) for r in chapters],
+            'sequentials': [dict(r) for r in sequentials],
+            'verticals': [dict(r) for r in verticals],
+            'recent_questions': [dict(r) for r in recent_questions],
+            'reports': [dict(r) for r in reports],
         }
 
     async def get_admin_users_page(self, search: str = '', limit: int = 50, offset: int = 0) -> dict[str, Any]:

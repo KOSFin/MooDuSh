@@ -26,6 +26,7 @@
     const PUSH_COOLDOWN_MS = 15000;
     const API_SYNC_MIN_GAP_MS = 8000;
     const ACTIVE_TAB_REFRESH_MIN_GAP_MS = 45000;
+    const ACTIVE_TAB_EMPTY_REFRESH_MIN_GAP_MS = 5000;
     const ACTIVE_TAB_REFRESH_AFTER_SUBMIT_WINDOW_MS = 15000;
     const BACKEND_LOG_THROTTLE_MS = 30000;
     const CONTENT_FALLBACK_BLOCK_MS = 90000;
@@ -46,6 +47,7 @@
     const PARTICIPANT_KEY_STORAGE = 'paramExtOpeneduParticipantKey';
     const OPENEDU_TOKEN_REQUIRED_TITLE = 'Нужен токен OpenEdu';
     const OPENEDU_TOKEN_REQUIRED_TEXT = 'Чтобы синхронизировать ответы и статистику OpenEdu, укажите Bearer токен в настройках расширения: API OpenEdu.';
+    const OPENEDU_PARSER_VERSION = window.ParamExtOpeneduParser?.VERSION || 'openedu-parser-v2.0.0';
 
     const NEGATIVE_MARK_RE = /(choicegroup_incorrect|[✗✘✕❌×]|(^|[^a-zа-яё])(incorrect|wrong|false|неверн|неправильн|ошиб)([^a-zа-яё]|$))/i;
     const POSITIVE_MARK_RE = /(choicegroup_correct|[✓✔✅☑]|(^|[^a-zа-яё])(correct|right|true|верн|правильн)([^a-zа-яё]|$))/i;
@@ -135,6 +137,7 @@
     let participantKeyCache = '';
     let lastMergedStatsByQuestion = null;
     let lastRenderedQuestions = [];
+    let lastParsedQuestionCount = 0;
     let lastMessageTriggerAt = 0;
     let lastMutationTriggerAt = 0;
     let lastMeaningfulQuestionsAt = 0;
@@ -145,15 +148,24 @@
     let lastAutoAdvanceWaitLogAt = 0;
     let activeTabPostSubmitRefreshGeneration = 0;
     let activeTabPostSubmitSoundGeneration = 0;
+    let lastEmptySectionRefreshKey = '';
+    let lastCourseDiscoveryAt = 0;
+    let openeduCourseVerticals = [];
 
     let iframeQuestionsCache = [];
     let topFrameIframeQuestions = null;
     let topFrameIframeStats = null;
     let topFrameIframeSyncAt = 0;
+    let topFrameIframeSnapshotSeq = 0;
+    const topFrameIframeSourceIds = new Map();
+    const topFrameIframeSnapshots = new Map();
     let topFrameOnlineState = { online: false, text: 'Wait...' };
     window.__PARAMEXT_TOPFRAME_ONLINE_STATE = topFrameOnlineState;
     let _topContextPromise = null;
     const virtualContentDocsByHost = new WeakMap();
+    const frameSyncId = isTopFrame
+        ? 'top'
+        : ('frame-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36));
 
     function buildLocalOpeneduSharedApi() {
         let fingerprintPunctRe = null;
@@ -441,13 +453,12 @@
                     }, '*');
                 } catch (e) {}
             } else if (event.data.type === 'PARAMEXT_OPENEDU_QUESTIONS_SYNC') {
-                topFrameIframeStats = event.data.stats;
-                topFrameIframeQuestions = event.data.questions;
-                topFrameIframeSyncAt = Date.now();
+                updateTopFrameIframeSnapshot(event);
                 debugSync('top_received_iframe_sync', {
                     questionCount: Array.isArray(topFrameIframeQuestions) ? topFrameIframeQuestions.length : 0,
                     statKeys: topFrameIframeStats && typeof topFrameIframeStats === 'object' ? Object.keys(topFrameIframeStats).length : 0,
-                    msSinceSequenceNavigation: lastSequenceNavigationAt > 0 ? topFrameIframeSyncAt - lastSequenceNavigationAt : 0
+                    msSinceSequenceNavigation: lastSequenceNavigationAt > 0 ? topFrameIframeSyncAt - lastSequenceNavigationAt : 0,
+                    frameCount: topFrameIframeSnapshots.size
                 });
                 renderStick(topFrameIframeStats, topFrameIframeQuestions);
             } else if (event.data.type === 'PARAMEXT_OPENEDU_STICK_ONLINE') {
@@ -673,6 +684,106 @@
 
     function hasOpeneduApiToken() {
         return getOpeneduApiToken().length > 0;
+    }
+
+    function getClientId() {
+        try {
+            let value = localStorage.getItem('paramExtClientId') || '';
+            if (!value) {
+                value = 'client_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+                localStorage.setItem('paramExtClientId', value);
+            }
+            return value;
+        } catch (_) {
+            return 'client_ephemeral';
+        }
+    }
+
+    function getClientMeta() {
+        const buildConfig = window.ParamExtBuildConfig || {};
+        return {
+            platform: 'openedu',
+            extensionVersion: chrome.runtime?.getManifest?.().version || 'unknown',
+            buildId: String(buildConfig.buildId || 'local-dev'),
+            parserVersion: OPENEDU_PARSER_VERSION,
+            clientId: getClientId(),
+            sessionId: frameSyncId,
+            channel: String(buildConfig.buildChannel || 'local')
+        };
+    }
+
+    async function refreshCourseDiscovery(force) {
+        if (!isTopFrame || !window.ParamExtOpeneduCourseApi || typeof window.ParamExtOpeneduCourseApi.discoverCurrentCourse !== 'function') {
+            return;
+        }
+        const now = Date.now();
+        if (!force && openeduCourseVerticals.length > 0 && now - lastCourseDiscoveryAt < 120000) {
+            return;
+        }
+        try {
+            const result = await window.ParamExtOpeneduCourseApi.discoverCurrentCourse();
+            openeduCourseVerticals = Array.isArray(result?.verticals) ? result.verticals : [];
+            lastCourseDiscoveryAt = now;
+            debugSync('course_discovery_complete', {
+                courseId: result?.courseId || '',
+                verticalCount: openeduCourseVerticals.length
+            });
+        } catch (error) {
+            debugSync('course_discovery_failed', {
+                error: error && error.message ? String(error.message) : 'unknown'
+            });
+        }
+    }
+
+    function getCourseRefForQuestion(question) {
+        const courseApi = window.ParamExtOpeneduCourseApi || {};
+        const courseId = typeof courseApi.findCourseId === 'function' ? courseApi.findCourseId(location.href) : '';
+        const source = String(question?.sourcePath || location.href || '');
+        const verticalId = typeof courseApi.extractBlockId === 'function' ? courseApi.extractBlockId(source) : '';
+        const matched = openeduCourseVerticals.find((item) => item.verticalId === verticalId)
+            || openeduCourseVerticals.find((item) => item.courseId === courseId)
+            || {};
+        return {
+            courseId: matched.courseId || courseId,
+            courseTitle: matched.courseTitle || document.title || '',
+            chapterId: matched.chapterId || '',
+            chapterTitle: matched.chapterTitle || '',
+            sequentialId: matched.sequentialId || '',
+            sequentialTitle: matched.sequentialTitle || '',
+            verticalId: matched.verticalId || verticalId,
+            verticalTitle: matched.verticalTitle || '',
+            problemId: question?.domId || '',
+            frameUrl: source
+        };
+    }
+
+    function enrichQuestionForV2(question) {
+        const answers = Array.isArray(question?.options) ? question.options : [];
+        const stableAnswers = answers
+            .filter((option) => option.inputType !== 'text')
+            .map((option) => sanitizeAnswerText(option.answerText))
+            .filter(Boolean);
+        const prompt = sanitizeQuestionPromptText(question?.prompt || '', stableAnswers);
+        const hasText = answers.some((option) => option.inputType === 'text');
+        const hasCheckbox = answers.some((option) => option.inputType === 'checkbox');
+        const hasRadio = answers.some((option) => option.inputType === 'radio');
+        const questionType = hasCheckbox
+            ? 'multiple_choice'
+            : (hasRadio ? 'single_choice' : (hasText ? 'text_input' : 'unknown'));
+        const questionFingerprint = typeof openeduShared.buildQuestionFingerprint === 'function'
+            ? openeduShared.buildQuestionFingerprint(prompt, stableAnswers)
+            : '';
+        const parseConfidence = prompt && questionType !== 'unknown'
+            ? Math.min(1, 0.55 + (stableAnswers.length > 0 || hasText ? 0.35 : 0))
+            : 0.25;
+        return {
+            questionType,
+            questionFingerprint,
+            parserSource: question?.fromVirtualContent ? 'virtual_dom' : 'live_dom',
+            parseConfidence,
+            rawType: '',
+            course: getCourseRefForQuestion(question)
+        };
     }
 
     function maybeLogBackendIssue(kind, payload) {
@@ -1396,7 +1507,7 @@
         while (current && current !== current.ownerDocument.documentElement) {
             if (
                 current instanceof HTMLElement
-                && findMatchingTableApp(current)
+                && getMatchingTableApp(current)
             ) {
                 return current;
             }
@@ -1737,17 +1848,25 @@
             return [];
         }
 
-        const pairs = openeduShared.buildMatchingTablePairs(
+        const candidatePairs = openeduShared.buildMatchingTablePairs(
+            matchingData.initialData,
+            {},
+            true,
+        );
+        const selectedPairs = openeduShared.buildMatchingTablePairs(
             matchingData.initialData,
             matchingData.input.value || '',
             true,
         );
+        const selectedKeys = new Set(selectedPairs
+            .filter((pair) => pair.selected)
+            .map((pair) => String(pair.cellId || '').trim() + '|' + String(pair.answerId || '').trim()));
         const options = [];
         const seen = new Set();
         const inputName = String(matchingData.input.name || '').trim();
         const inputPath = buildElementPath(root, matchingData.input);
 
-        pairs.forEach((pair, idx) => {
+        candidatePairs.forEach((pair, idx) => {
             const answerText = normalizeQuestionOptionText(pair.answerText) || String(pair.answerText || '').trim();
             const cellId = String(pair.cellId || '').trim();
             const answerId = String(pair.answerId || '').trim();
@@ -1764,8 +1883,8 @@
             options.push({
                 answerKey: 'match:' + cellId + ':' + answerId,
                 answerText,
-                selected: Boolean(pair.selected),
-                correct: Boolean(pair.selected) && isQuestionCorrect(root),
+                selected: selectedKeys.has(dedupeKey),
+                correct: selectedKeys.has(dedupeKey) && isQuestionCorrect(root),
                 answerAliases: [pair.answerTitle, pair.cellLabel].filter(Boolean),
                 inputId: matchingData.input.id || '',
                 inputName,
@@ -1792,8 +1911,9 @@
             return '';
         }
 
-        const prompt = collapseWhitespace(content.body || content.title || '');
-        return normalizePromptLikeText(prompt);
+        return normalizePromptCandidateText(content.body)
+            || normalizePromptCandidateText(content.title)
+            || normalizePromptLikeText(collapseWhitespace(content.body || content.title || ''));
     }
 
     function getDragMatchingTableData(root) {
@@ -1983,19 +2103,70 @@
         return result;
     }
 
+    function isGenericQuestionInstructionText(value) {
+        const text = normalizeText(String(value || '').replace(/[.!?:;…]+$/g, ''));
+        if (!text) {
+            return true;
+        }
+
+        return /^(?:выберите|отметьте)\s+(?:один\s+|все\s+|несколько\s+)?(?:правильн\w+|верн\w+)\s+вариант(?:ы)?(?:\s+ответ(?:а|ов)?)?$/i.test(text)
+            || /^выберите\s+(?:правильный|верный)\s+ответ$/i.test(text)
+            || /^выберите\s+ответ$/i.test(text)
+            || /^дополните(?:\s+(?:предложение|фразу|текст|утверждение))?$/i.test(text)
+            || /^(?:впишите|введите)\s+(?:ответ|слово|значение)$/i.test(text)
+            || /^заполните\s+(?:пропуск|пустое\s+поле)$/i.test(text);
+    }
+
+    function getFirstPromptCandidate(root, selectorGroups) {
+        if (!(root instanceof HTMLElement)) {
+            return '';
+        }
+
+        for (const selector of selectorGroups) {
+            if (root.matches(selector)) {
+                const prompt = normalizePromptCandidateText(textOf(root));
+                if (prompt) {
+                    return prompt;
+                }
+            }
+
+            const nodes = root.querySelectorAll(selector);
+            for (const node of nodes) {
+                const prompt = normalizePromptCandidateText(textOf(node));
+                if (prompt) {
+                    return prompt;
+                }
+            }
+        }
+
+        return '';
+    }
+
     function getQuestionPrompt(root) {
-        const labelNode = root.querySelector(
-            '.problem-header, .problem-group-label, .wrapper-problem-response p, .wrapper-problem-response h3, .problem-title, .question-title, legend'
-        );
-        const localPrompt = normalizePromptLikeText(textOf(labelNode))
-            || normalizePromptLikeText(textOf(root.querySelector('h2, h3, p, legend')));
+        const localPrompt = getFirstPromptCandidate(root, [
+            '.problem-group-label',
+            'legend',
+            '.problem-header',
+            '.problem-title',
+            '.question-title',
+            'h2, h3, h4',
+            '.wrapper-problem-response > p',
+            'p'
+        ]);
         if (localPrompt) {
             return localPrompt;
         }
 
         const problemContainer = root.closest('.xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert');
         if (problemContainer instanceof HTMLElement && problemContainer !== root) {
-            return normalizePromptLikeText(textOf(problemContainer.querySelector('.problem-header, .problem-title, h2, h3, legend')));
+            return getFirstPromptCandidate(problemContainer, [
+                '.problem-group-label',
+                'legend',
+                '.problem-header',
+                '.problem-title',
+                '.question-title',
+                'h2, h3, h4'
+            ]);
         }
 
         return '';
@@ -2013,6 +2184,14 @@
             .replace(/\s+/g, ' ')
             .trim();
 
+        return text;
+    }
+
+    function normalizePromptCandidateText(value) {
+        const text = normalizePromptLikeText(value);
+        if (!text || isGenericQuestionInstructionText(text)) {
+            return '';
+        }
         return text;
     }
 
@@ -2497,12 +2676,12 @@
         while (cursor && cursor !== root) {
             let previous = cursor.previousElementSibling;
             while (previous) {
-                const direct = textOf(previous);
+                const direct = normalizePromptCandidateText(textOf(previous));
                 if (direct && direct.length >= 8) {
                     return direct;
                 }
 
-                const nested = textOf(previous.querySelector('h1, h2, h3, h4, legend, .problem-title, .question-title, .problem-header, p'));
+                const nested = normalizePromptCandidateText(textOf(previous.querySelector('h1, h2, h3, h4, legend, .problem-title, .question-title, .problem-header, p')));
                 if (nested && nested.length >= 8) {
                     return nested;
                 }
@@ -3132,7 +3311,8 @@
             const sourcePath = getQuestionSourcePath(ownerDoc);
             const virtualProblemId = ownerDoc.__PARAMEXT_HOST_PROBLEM_ID || '';
             const baseDomId = root.getAttribute('data-problem-id') || root.getAttribute('id') || virtualProblemId || ('question-' + idx);
-            const fallbackPrompt = getQuestionPrompt(root) || getMatchingTablePrompt(root);
+            const matchingPrompt = getMatchingTablePrompt(root);
+            const fallbackPrompt = matchingPrompt || getQuestionPrompt(root);
 
             const grouped = new Map();
             options.forEach((option, optionIndex) => {
@@ -3162,7 +3342,10 @@
                     .filter(Boolean);
                 const nearPrompt = findPromptBeforeNode(root, groupRoot);
                 const prompt = sanitizeQuestionPromptText(
-                    getQuestionPrompt(groupRoot) || nearPrompt || fallbackPrompt,
+                    (getMatchingTableData(groupRoot) ? getMatchingTablePrompt(groupRoot) : '')
+                        || getQuestionPrompt(groupRoot)
+                        || nearPrompt
+                        || fallbackPrompt,
                     promptAnswerTexts,
                 );
 
@@ -3245,20 +3428,24 @@
             }
         });
 
-        return deduped.map((item) => ({
-            questionKey: item.questionKey,
-            domId: item.domId,
-            domSelector: item.domSelector,
-            ownerDocument: item.ownerDocument,
-            root: item.root,
-            prompt: item.prompt,
-            correct: item.correct,
-            options: item.options,
-            allowsMultipleAnswers: item.allowsMultipleAnswers,
-            hasVerifiedAnswer: item.hasVerifiedAnswer,
-            fromVirtualContent: Boolean(item.fromVirtualContent),
-            orderIndex: item.orderIndex
-        }));
+        return deduped.map((item) => {
+            const question = {
+                questionKey: item.questionKey,
+                domId: item.domId,
+                domSelector: item.domSelector,
+                ownerDocument: item.ownerDocument,
+                root: item.root,
+                prompt: item.prompt,
+                correct: item.correct,
+                options: item.options,
+                allowsMultipleAnswers: item.allowsMultipleAnswers,
+                hasVerifiedAnswer: item.hasVerifiedAnswer,
+                fromVirtualContent: Boolean(item.fromVirtualContent),
+                sourcePath: item.sourcePath,
+                orderIndex: item.orderIndex
+            };
+            return Object.assign(question, enrichQuestionForV2(question));
+        });
     }
 
     function isWholePageCompleted(questions) {
@@ -3273,6 +3460,7 @@
         const payload = {
             source: 'extension',
             context,
+            client: getClientMeta(),
             completed: isWholePageCompleted(questions),
             questions: questions.map((question) => {
                 const answerTexts = question.options.map((option) => sanitizeAnswerText(option.answerText));
@@ -3280,6 +3468,12 @@
                 return {
                     questionKey: question.questionKey,
                     prompt,
+                    questionType: question.questionType || 'unknown',
+                    questionFingerprint: question.questionFingerprint || '',
+                    parserSource: question.parserSource || 'live_dom',
+                    parseConfidence: Number(question.parseConfidence || 0),
+                    rawType: question.rawType || '',
+                    course: question.course || getCourseRefForQuestion(question),
                     verified: question.hasVerifiedAnswer,
                     isCorrect: question.correct,
                     answers: question.options.map((option) => ({
@@ -3288,7 +3482,8 @@
                         selected: option.selected,
                         correct: option.correct,
                         incorrect: option.incorrect,
-                        inputType: option.inputType || ''
+                        inputType: option.inputType || '',
+                        answerFingerprint: hash(sanitizeAnswerText(option.answerText) || option.answerKey)
                     }))
                 };
             })
@@ -3301,7 +3496,7 @@
             questions: summarizeQuestionsForDebug(questions)
         });
 
-        const result = await postWithRetry('/v1/openedu/attempts', payload, 2);
+        const result = await postWithRetry('/v2/openedu/attempts', payload, 2);
         debugSync('push_attempt_snapshot_result', {
             ok: result.ok,
             status: result.status,
@@ -3314,6 +3509,7 @@
         const context = getCourseContext();
         const queryPayload = {
             context,
+            client: getClientMeta(),
             questionKeys: questions.map((question) => question.questionKey),
             questions: questions.map((question) => {
                 const answers = question.options
@@ -3323,7 +3519,12 @@
                 return {
                     questionKey: question.questionKey,
                     prompt: sanitizeQuestionPromptText(question.prompt, answers),
-                    answers
+                    answers,
+                    questionType: question.questionType || 'unknown',
+                    questionFingerprint: question.questionFingerprint || '',
+                    parserSource: question.parserSource || 'live_dom',
+                    parseConfidence: Number(question.parseConfidence || 0),
+                    course: question.course || getCourseRefForQuestion(question)
                 };
             })
         };
@@ -3334,7 +3535,7 @@
             questionKeys: queryPayload.questionKeys
         });
 
-        const result = await postWithRetry('/v1/openedu/solutions/query', queryPayload, 1);
+        const result = await postWithRetry('/v2/openedu/solutions/query', queryPayload, 1);
         const statsByQuestion = result?.data?.statsByQuestion;
         const statsKeys = statsByQuestion && typeof statsByQuestion === 'object' ? Object.keys(statsByQuestion) : [];
         const nonEmptyStatsKeys = statsKeys.filter((key) => {
@@ -3392,6 +3593,103 @@
     function findQuestionByReference(questions, reference) {
         const list = Array.isArray(questions) ? questions : [];
         return list.find((question) => matchesQuestionReference(question, reference)) || null;
+    }
+
+    function getTopFrameIframeSourceKey(event) {
+        const explicitFrameId = collapseWhitespace(event?.data?.frameId || '');
+        if (explicitFrameId) {
+            return explicitFrameId;
+        }
+
+        const source = event?.source;
+        if (source && (typeof source === 'object' || typeof source === 'function')) {
+            if (!topFrameIframeSourceIds.has(source)) {
+                topFrameIframeSnapshotSeq += 1;
+                topFrameIframeSourceIds.set(source, 'frame-source-' + String(topFrameIframeSnapshotSeq));
+            }
+            return topFrameIframeSourceIds.get(source);
+        }
+
+        topFrameIframeSnapshotSeq += 1;
+        return 'frame-unknown-' + String(topFrameIframeSnapshotSeq);
+    }
+
+    function mergeStatsEntryForIframeAggregate(previous, next) {
+        if (!previous) {
+            return buildMergedStatsEntry(next, Boolean(next?.localOnly));
+        }
+
+        return {
+            completedCount: Math.max(
+                Number(previous.completedCount || 0),
+                Number(next?.completedCount || 0)
+            ),
+            verifiedAnswers: mergeAnswerStatsLists(previous.verifiedAnswers, next?.verifiedAnswers),
+            incorrectAnswers: mergeAnswerStatsLists(previous.incorrectAnswers, next?.incorrectAnswers),
+            fallbackAnswers: mergeAnswerStatsLists(previous.fallbackAnswers, next?.fallbackAnswers),
+            localOnly: Boolean(previous.localOnly) && Boolean(next?.localOnly),
+            similarMatch: Boolean(previous.similarMatch) || Boolean(next?.similarMatch),
+            matchedBy: previous.matchedBy || next?.matchedBy || '',
+            matchedQuestionKey: previous.matchedQuestionKey || next?.matchedQuestionKey || '',
+            matchedScore: Math.max(Number(previous.matchedScore || 0), Number(next?.matchedScore || 0))
+        };
+    }
+
+    function rebuildTopFrameIframeAggregate(now) {
+        const currentTime = Number(now || Date.now());
+        const maxAgeMs = 180000;
+        const questions = [];
+        const stats = {};
+        let latestSyncAt = 0;
+
+        for (const [key, snapshot] of topFrameIframeSnapshots.entries()) {
+            const updatedAt = Number(snapshot?.updatedAt || 0);
+            if (updatedAt > 0 && currentTime - updatedAt > maxAgeMs) {
+                topFrameIframeSnapshots.delete(key);
+                continue;
+            }
+
+            latestSyncAt = Math.max(latestSyncAt, updatedAt);
+            (Array.isArray(snapshot?.questions) ? snapshot.questions : []).forEach((question) => {
+                questions.push(question);
+            });
+
+            const snapshotStats = snapshot?.stats && typeof snapshot.stats === 'object'
+                ? snapshot.stats
+                : {};
+            Object.keys(snapshotStats).forEach((questionKey) => {
+                stats[questionKey] = mergeStatsEntryForIframeAggregate(stats[questionKey], snapshotStats[questionKey]);
+            });
+        }
+
+        topFrameIframeQuestions = questions;
+        topFrameIframeStats = stats;
+        topFrameIframeSyncAt = latestSyncAt;
+    }
+
+    function updateTopFrameIframeSnapshot(event) {
+        const now = Date.now();
+        const sourceKey = getTopFrameIframeSourceKey(event);
+        topFrameIframeSnapshots.set(sourceKey, {
+            updatedAt: now,
+            stats: event?.data?.stats && typeof event.data.stats === 'object' ? event.data.stats : {},
+            questions: Array.isArray(event?.data?.questions) ? event.data.questions : []
+        });
+        rebuildTopFrameIframeAggregate(now);
+    }
+
+    function clearTopFrameIframeSnapshots(source) {
+        if (!isTopFrame) {
+            return;
+        }
+
+        topFrameIframeSnapshots.clear();
+        topFrameIframeQuestions = null;
+        topFrameIframeStats = null;
+        topFrameIframeSyncAt = 0;
+        debugSync('top_iframe_snapshots_cleared', {
+            source: String(source || 'unknown')
+        });
     }
 
     function broadcastOpeneduMessageToChildFrames(payload) {
@@ -3561,6 +3859,36 @@
         input.checked = checked;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function dispatchAnswerMutationEvents(element) {
+        if (!(element instanceof EventTarget)) {
+            return;
+        }
+
+        ['input', 'change', 'keyup', 'blur'].forEach((eventName) => {
+            try {
+                element.dispatchEvent(new Event(eventName, { bubbles: true }));
+            } catch (_) {
+                // Some synthetic targets do not support every event type.
+            }
+        });
+    }
+
+    function notifyQuestionAnswerChanged(block, primaryControl) {
+        if (!(block instanceof HTMLElement)) {
+            return;
+        }
+
+        dispatchAnswerMutationEvents(primaryControl);
+        const form = block.closest('form');
+        dispatchAnswerMutationEvents(form);
+        dispatchAnswerMutationEvents(block);
+
+        setTimeout(() => {
+            dispatchAnswerMutationEvents(primaryControl);
+            dispatchAnswerMutationEvents(form);
+        }, 60);
     }
 
     function highlightQuestionBlock(block) {
@@ -3944,6 +4272,7 @@
         matchingData.input.dispatchEvent(new Event('input', { bubbles: true }));
         matchingData.input.dispatchEvent(new Event('change', { bubbles: true }));
         const visualSynced = syncMatchingTableVisualAnswers(matchingData, targets);
+        notifyQuestionAnswerChanged(block, matchingData.input);
         highlightQuestionBlock(block);
         debugSync('apply_answers_success', {
             questionKey: question?.questionKey || '',
@@ -3978,6 +4307,7 @@
         setNativeInputValue(dragData.textarea, JSON.stringify({ answer }));
         dragData.textarea.dispatchEvent(new Event('input', { bubbles: true }));
         dragData.textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        notifyQuestionAnswerChanged(dragData.container, dragData.textarea);
     }
 
     function dispatchDragMatchingChange(target) {
@@ -4128,6 +4458,7 @@
 
         select.dispatchEvent(new Event('input', { bubbles: true }));
         select.dispatchEvent(new Event('change', { bubbles: true }));
+        notifyQuestionAnswerChanged(block, select);
         highlightQuestionBlock(block);
         debugSync('apply_answers_success', {
             questionKey: question?.questionKey || '',
@@ -4178,6 +4509,7 @@
             setNativeInputValue(textInput, targetText);
             textInput.dispatchEvent(new Event('input', { bubbles: true }));
             textInput.dispatchEvent(new Event('change', { bubbles: true }));
+            notifyQuestionAnswerChanged(block, textInput);
             highlightQuestionBlock(block);
             debugSync('apply_answers_success', {
                 questionKey: question?.questionKey || '',
@@ -4224,6 +4556,7 @@
 
             input.click();
             input.dispatchEvent(new Event('change', { bubbles: true }));
+            notifyQuestionAnswerChanged(block, input);
             highlightQuestionBlock(block);
             debugSync('apply_answers_success', {
                 questionKey: question?.questionKey || '',
@@ -4266,6 +4599,7 @@
             });
         }
 
+        notifyQuestionAnswerChanged(block, selectedInputs.values().next().value || null);
         highlightQuestionBlock(block);
         debugSync('apply_answers_success', {
             questionKey: question?.questionKey || '',
@@ -4279,7 +4613,7 @@
     }
 
     function applyAnswerToQuestion(question, answer) {
-        return applyAnswersToQuestion(question, [answer], 'add');
+        return applyAnswersToQuestion(question, [answer], 'set-all');
     }
 
     function isOpeneduAutoInsertMode() {
@@ -4502,6 +4836,7 @@
         const now = Date.now();
         lastSequenceNavigationAt = now;
         lastSequenceNavigationGeneration += 1;
+        clearTopFrameIframeSnapshots(source);
         if (activeTabKey) {
             lastSequenceTabKey = activeTabKey;
         }
@@ -5596,7 +5931,7 @@
             applyVerified.disabled = verifiedAnswers.length === 0;
             applyVerified.addEventListener('click', () => {
                 const payload = isMulti ? verifiedAnswers : [verifiedAnswers[0]];
-                const mode = isMulti ? 'set-all' : 'add';
+                const mode = 'set-all';
                 const applied = applyAnswersToQuestion(question, payload, mode);
                 if (!applied) {
                     maybeLogBackendIssue('openedu_apply_failed', {
@@ -5618,7 +5953,7 @@
                 applyFallback.disabled = fallbackAnswers.length === 0;
                 applyFallback.addEventListener('click', () => {
                     const payload = isMulti ? fallbackAnswers : [fallbackAnswers[0]];
-                    const mode = isMulti ? 'set-all' : 'add';
+                    const mode = 'set-all';
                     const applied = applyAnswersToQuestion(question, payload, mode);
                     if (!applied) {
                         maybeLogBackendIssue('openedu_apply_failed', {
@@ -5662,7 +5997,7 @@
                         : (answer.incorrectCount > 0 ? (answer.answerText + ' ✕') : answer.answerText);
                     answerBtn.title = 'Вставить этот вариант';
                     answerBtn.addEventListener('click', () => {
-                        const applied = applyAnswersToQuestion(question, [answer], 'add');
+                        const applied = applyAnswersToQuestion(question, [answer], 'set-all');
                         if (!applied) {
                             maybeLogBackendIssue('openedu_apply_failed', {
                                 questionKey: question.questionKey,
@@ -6171,6 +6506,7 @@
 
             window.top.postMessage({
                 type: 'PARAMEXT_OPENEDU_QUESTIONS_SYNC',
+                frameId: frameSyncId,
                 stats: statsByQuestion,
                 questions: simplifiedQuestions
             }, '*');
@@ -6211,8 +6547,15 @@
         lastCycleAt = now;
         cycleInFlight = true;
         try {
+            if (allowNetwork) {
+                await refreshCourseDiscovery(false);
+            }
             const questions = parseQuestions();
             iframeQuestionsCache = questions;
+            lastParsedQuestionCount = questions.length;
+            if (window.ParamExtOpeneduDebugOverlay) {
+                window.ParamExtOpeneduDebugOverlay.render(questions, Boolean(settings?.diagnostics?.openeduDebugOverlay));
+            }
             if (questions.length > 0) {
                 lastMeaningfulQuestionsAt = now;
             }
@@ -6241,6 +6584,10 @@
                     retainRenderedAnswers,
                     usingTopIframeCache: Boolean(isTopFrame && topFrameIframeQuestions && topFrameIframeQuestions.length > 0)
                 });
+
+                if (isTopFrame && !hasTopFrameIframeQuestions()) {
+                    refreshActiveSequenceTabForEmptySection('cycle-no-questions');
+                }
 
                 if (retainRenderedAnswers) {
                     return;
@@ -6537,7 +6884,7 @@
     }
 
     function isActiveTabPostSubmitRefreshEnabled() {
-        return Boolean(settings?.openedu?.activeTabPostSubmitRefreshEnabled);
+        return Boolean(settings?.openedu?.activeTabPostSubmitRefreshEnabled || settings?.openedu?.activeTabRefreshEnabled);
     }
 
     function requestActiveTabPostSubmitRefresh(source) {
@@ -6586,6 +6933,63 @@
         return Boolean(tab.querySelector('.text-success, .fa-check, [data-icon="check"]'));
     }
 
+    function hasTopFrameIframeQuestions() {
+        return Array.isArray(topFrameIframeQuestions) && topFrameIframeQuestions.length > 0;
+    }
+
+    function refreshActiveSequenceTabForEmptySection(source) {
+        if (!isTopFrame || !settings?.openedu?.activeTabRefreshEnabled) {
+            return false;
+        }
+
+        const activeTab = findActiveSequenceTab();
+        if (!(activeTab instanceof HTMLElement)) {
+            return false;
+        }
+
+        const tabsHost = activeTab.closest('.sequence-navigation-tabs') || activeTab.parentElement;
+        const activeTabKey = getActiveSequenceTabKey(tabsHost, activeTab);
+        const now = Date.now();
+
+        if (isSequenceTabComplete(activeTab)) {
+            if (isAutoAdvanceEnabled()) {
+                setTimeout(() => maybeClickNextOnSequencePage(), 250);
+            }
+            return false;
+        }
+
+        if (
+            activeTabKey === lastEmptySectionRefreshKey
+            && now - lastActiveTabRefreshAt < ACTIVE_TAB_EMPTY_REFRESH_MIN_GAP_MS
+        ) {
+            return false;
+        }
+
+        lastEmptySectionRefreshKey = activeTabKey;
+        lastActiveTabRefreshAt = now;
+        activeTab.click();
+        markSequenceNavigation(source || 'empty-section-refresh', activeTabKey);
+        requestSequenceFrameSync(source || 'empty-section-refresh', now);
+
+        setTimeout(() => {
+            const refreshedTab = findActiveSequenceTab();
+            if (isSequenceTabComplete(refreshedTab) && isAutoAdvanceEnabled()) {
+                maybeClickNextOnSequencePage();
+            }
+        }, 1400);
+
+        setTimeout(() => {
+            scheduleCycle(false, 'empty-section-refresh', { allowNetwork: false });
+        }, 1800);
+
+        debugSync('empty_section_active_tab_refresh_clicked', {
+            source: String(source || 'empty-section-refresh'),
+            activeTabKey,
+            title: activeTab.getAttribute('title') || ''
+        });
+        return true;
+    }
+
     function scheduleActiveTabPostSubmitRefresh(source) {
         if (!isTopFrame || !isActiveTabPostSubmitRefreshEnabled()) {
             return;
@@ -6617,7 +7021,7 @@
                     return;
                 }
 
-                if (isSequenceTabComplete(activeTab)) {
+                if (isSequenceTabComplete(activeTab) && index > 0) {
                     debugSync('active_tab_post_submit_refresh_complete', {
                         generation,
                         attempt: index + 1
@@ -6630,6 +7034,7 @@
 
                 lastActiveTabRefreshAt = Date.now();
                 activeTab.click();
+                markSequenceNavigation('active-tab-post-submit-refresh', getActiveSequenceTabKey(activeTab.parentElement, activeTab));
                 requestSequenceFrameSync('active-tab-post-submit-refresh', Date.now());
                 debugSync('active_tab_post_submit_refresh_clicked', {
                     generation,
@@ -6704,15 +7109,24 @@
             markSequenceNavigation('active-tab-changed', activeTabKey);
         }
 
-        const isComplete = activeTab.classList.contains('complete');
+        const isComplete = isSequenceTabComplete(activeTab);
         if (!isComplete && settings.openedu.activeTabRefreshEnabled) {
+            const noQuestionsOnCurrentSection = lastParsedQuestionCount === 0 && !hasTopFrameIframeQuestions();
+            const refreshGapMs = noQuestionsOnCurrentSection
+                ? ACTIVE_TAB_EMPTY_REFRESH_MIN_GAP_MS
+                : ACTIVE_TAB_REFRESH_MIN_GAP_MS;
             const canRefreshActiveTab =
-                (now - lastSubmitActionAt) <= ACTIVE_TAB_REFRESH_AFTER_SUBMIT_WINDOW_MS &&
-                (now - lastActiveTabRefreshAt) >= ACTIVE_TAB_REFRESH_MIN_GAP_MS;
+                ((now - lastSubmitActionAt) <= ACTIVE_TAB_REFRESH_AFTER_SUBMIT_WINDOW_MS || noQuestionsOnCurrentSection) &&
+                (now - lastActiveTabRefreshAt) >= refreshGapMs;
 
             if (canRefreshActiveTab) {
                 lastActiveTabRefreshAt = now;
                 activeTab.click();
+                markSequenceNavigation(
+                    noQuestionsOnCurrentSection ? 'auto-next-empty-section-refresh' : 'auto-next-active-tab-refresh',
+                    activeTabKey
+                );
+                requestSequenceFrameSync('auto-next-active-tab-refresh', now);
             }
             return;
         }

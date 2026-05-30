@@ -104,6 +104,29 @@
         return headers;
     }
 
+    function getClientMeta(scope) {
+        const buildConfig = global.ParamExtBuildConfig || {};
+        let clientId = '';
+        try {
+            clientId = localStorage.getItem('paramExtClientId') || '';
+            if (!clientId) {
+                clientId = 'client_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+                localStorage.setItem('paramExtClientId', clientId);
+            }
+        } catch (_) {
+            clientId = 'client_ephemeral';
+        }
+        return {
+            platform: getPlatformFromScope(scope, 'unknown'),
+            extensionVersion: safeGetExtensionVersion(),
+            buildId: String(buildConfig.buildId || 'local-dev'),
+            parserVersion: String(buildConfig.parserVersion || 'openedu-parser-v2'),
+            clientId,
+            sessionId: String(Date.now()),
+            channel: String(buildConfig.buildChannel || 'local')
+        };
+    }
+
     function buildSystemInfo(scope) {
         return {
             scope,
@@ -209,7 +232,7 @@
 
                 try {
                     const bgResponse = await requestViaBackground({
-                        url: baseUrl + '/v1/logs/client',
+                        url: baseUrl + '/v2/logs/client',
                         method: 'POST',
                         headers: buildHeaders(token),
                         body: JSON.stringify(packet),
@@ -231,7 +254,7 @@
                             break;
                         }
                     } else {
-                        const response = await fetch(baseUrl + '/v1/logs/client', {
+                        const response = await fetch(baseUrl + '/v2/logs/client', {
                             method: 'POST',
                             headers: buildHeaders(token),
                             body: JSON.stringify(packet),
@@ -271,7 +294,9 @@
         const packet = {
             kind,
             payload,
-            system: buildSystemInfo(scope)
+            system: buildSystemInfo(scope),
+            client: getClientMeta(scope),
+            severity: String(kind || '').toLowerCase().includes('warning') ? 'warning' : 'error'
         };
 
         queue.push(packet);

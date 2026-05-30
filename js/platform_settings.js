@@ -8,11 +8,22 @@
         requestTimeoutMs: 4000
     };
 
+    const buildConfig = global.ParamExtBuildConfig || {};
+
     const DEFAULT_SETTINGS = {
         activePlatform: 'openedu',
         backend: {
-            moodle: deepClone(DEFAULT_BACKEND_CONFIG),
-            openedu: deepClone(DEFAULT_BACKEND_CONFIG)
+            moodle: Object.assign(deepClone(DEFAULT_BACKEND_CONFIG), {
+                apiBaseUrl: buildConfig.moodleApiBaseUrl || DEFAULT_BACKEND_CONFIG.apiBaseUrl
+            }),
+            openedu: Object.assign(deepClone(DEFAULT_BACKEND_CONFIG), {
+                apiBaseUrl: buildConfig.openeduApiBaseUrl || DEFAULT_BACKEND_CONFIG.apiBaseUrl
+            })
+        },
+        onboarding: {
+            privacyAccepted: false,
+            allowTechnicalDataCollection: true,
+            completed: false
         },
         moodle: {
             mode: 'wand',
@@ -34,6 +45,9 @@
             autoUseFallbackAnswers: false,
             autoCheckAnswers: false,
             missingAnswerAction: 'stop'
+        },
+        diagnostics: {
+            openeduDebugOverlay: false
         }
     };
 
@@ -131,6 +145,16 @@
             next.openedu.autoAdvanceDelayMs = Math.max(500, toNumberOrFallback(openedu.autoAdvanceDelayMs, next.openedu.autoAdvanceDelayMs));
         }
 
+        if (source.onboarding && typeof source.onboarding === 'object') {
+            next.onboarding.privacyAccepted = Boolean(source.onboarding.privacyAccepted);
+            next.onboarding.allowTechnicalDataCollection = source.onboarding.allowTechnicalDataCollection !== false;
+            next.onboarding.completed = Boolean(source.onboarding.completed);
+        }
+
+        if (source.diagnostics && typeof source.diagnostics === 'object') {
+            next.diagnostics.openeduDebugOverlay = Boolean(source.diagnostics.openeduDebugOverlay);
+        }
+
         return next;
     }
 
@@ -142,6 +166,8 @@
             nextBtnText: normalized.moodle.nextButtonText,
             autoSolving: normalized.moodle.autoSolving,
             hideWidgetByDefault: normalized.moodle.hideWidgetByDefault,
+            privacyPolicyAcceptedByUser: normalized.onboarding.privacyAccepted,
+            allowTechnicalDataCollection: normalized.onboarding.allowTechnicalDataCollection,
             backend: {
                 apiBaseUrl: normalized.backend.moodle.apiBaseUrl,
                 apiToken: normalized.backend.moodle.apiToken,

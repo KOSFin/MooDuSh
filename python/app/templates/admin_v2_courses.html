@@ -1,0 +1,56 @@
+{% extends "admin_base.html" %}
+{% block title %}Курсы V2{% endblock %}
+{% block page_title %}Курсы V2{% endblock %}
+{% block content %}
+<div class="section-head">
+    <h2>Курсы OpenEdu V2 <span class="text-muted">({{ data.total }})</span></h2>
+</div>
+
+<form method="get" action="/admin/v2/courses" class="search-row">
+    <input type="text" name="q" value="{{ search }}" class="search-input" placeholder="course_id, название или host">
+    <button type="submit" class="btn">Найти</button>
+    {% if search %}<a class="btn btn-secondary" href="/admin/v2/courses">Сбросить</a>{% endif %}
+</form>
+
+<section class="panel">
+    <table>
+        <thead>
+            <tr>
+                <th>Курс</th>
+                <th>Разделы</th>
+                <th>Sequence</th>
+                <th>Vertical</th>
+                <th>Вопросы</th>
+                <th>Попытки</th>
+                <th>Обновлен</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for c in data.courses %}
+            <tr class="row-link">
+                <td class="cell-wrap">
+                    <a href="/admin/v2/courses/{{ c.course_id }}">{{ c.title or c.course_id }}</a>
+                    <div class="text-muted">{{ c.host }} · {{ c.course_id }}</div>
+                </td>
+                <td>{{ c.chapter_count }}</td>
+                <td>{{ c.sequential_count }}</td>
+                <td>{{ c.vertical_count }}</td>
+                <td>{{ c.question_count }}</td>
+                <td>{{ c.attempt_count }}</td>
+                <td class="text-muted">{{ c.updated_at.strftime('%d.%m.%Y %H:%M') if c.updated_at else '-' }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="7" class="empty">Курсов V2 пока нет.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+{% if data.total > page_size %}
+<div class="pagination">
+    {% for p in range(1, (data.total + page_size - 1) // page_size + 1) %}
+        <a href="/admin/v2/courses?page={{ p }}{% if search %}&q={{ search_url }}{% endif %}" class="{% if p == page %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

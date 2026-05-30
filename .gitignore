@@ -1,1 +1,5 @@
 test-files
+
+node_modules/
+.venv/
+dist/

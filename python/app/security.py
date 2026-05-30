@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import secrets
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import Header, HTTPException, Request, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
 
 _db: Database | None = None
 _signer: URLSafeTimedSerializer | None = None
+_rate_buckets: dict[str, list[float]] = {}
 
 ADMIN_COOKIE = 'paramext_admin'
 ADMIN_MAX_AGE = 86400  # 24 hours
@@ -45,14 +47,18 @@ def _extract_token(authorization: str | None, x_api_token: str | None) -> str:
 
 
 async def require_api_token(
-    authorization: str | None = Header(default=None),
-    x_api_token: str | None = Header(default=None),
-) -> int | None:
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    x_api_token: Optional[str] = Header(default=None),
+) -> Optional[int]:
     token = _extract_token(authorization, x_api_token)
+    _enforce_rate_limit(request, token)
 
     # Master token from env — grants access without a user record.
     master = settings.api_bearer_token or settings.api_token
     if master and token == master:
+        request.state.auth_token_type = 'master'
+        request.state.user_id = None
         return None
 
     # Per-user token from DB.
@@ -60,15 +66,37 @@ async def require_api_token(
         user = await _db.get_user_by_token(token)
         if user:
             await _db.touch_user_activity(user['id'])
+            request.state.auth_token_type = 'user'
+            request.state.user_id = int(user['id'])
             return int(user['id'])
 
-    # Open access when no master token is configured.
-    if not master:
+    # Development keeps local work easy, production must never expose the API
+    # only because a master token was forgotten.
+    if not master and settings.app_env != 'production':
+        request.state.auth_token_type = 'anonymous-dev'
+        request.state.user_id = None
         return None
 
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='API токен не предоставлен')
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Неверный API токен')
+
+
+def _enforce_rate_limit(request: Request, token: str) -> None:
+    limit = max(10, int(settings.v2_rate_limit_per_minute or 120))
+    now = time.monotonic()
+    window_start = now - 60
+    client_host = request.client.host if request.client else 'unknown'
+    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()[:16] if token else 'no-token'
+    key = f'{client_host}:{token_hash}'
+
+    bucket = [item for item in _rate_buckets.get(key, []) if item >= window_start]
+    if len(bucket) >= limit:
+        _rate_buckets[key] = bucket
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail='Слишком много запросов')
+
+    bucket.append(now)
+    _rate_buckets[key] = bucket
 
 
 def verify_admin_password(value: str) -> bool:

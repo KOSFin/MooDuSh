@@ -17,24 +17,24 @@
    "content_scripts": [ {
       "css": [ "css/widgets/context_menu.css" ],
       "include_globs": [ "*mod/quiz/attempt.php*", "*mod/quiz/review.php*" ],
-      "js": [ "js/platform_settings.js", "js/telemetry.js", "js/commons.js", "js/quiz_attempt.js", "js/content_logic.js" ],
+      "js": [ "js/build_config.js", "js/platform_settings.js", "js/telemetry.js", "js/commons.js", "js/quiz_attempt.js", "js/content_logic.js" ],
       "matches": [ "*://*/*" ],
       "run_at": "document_idle"
    }, {
       "include_globs": [ "*mod/quiz/summary.php*" ],
-      "js": [ "js/platform_settings.js", "js/commons.js", "js/quiz_overview.js" ],
+      "js": [ "js/build_config.js", "js/platform_settings.js", "js/commons.js", "js/quiz_overview.js" ],
       "matches": [ "*://*/*" ],
       "run_at": "document_idle"
    }, {
       "include_globs": [ "*mod/quiz/view.php*" ],
-      "js": [ "js/platform_settings.js", "js/commons.js", "js/quiz_board.js" ],
+      "js": [ "js/build_config.js", "js/platform_settings.js", "js/commons.js", "js/quiz_board.js" ],
       "matches": [ "*://*/*" ],
       "run_at": "document_idle"
    }, {
       "all_frames": true,
       "css": [ "css/widgets/openedu_stick.css" ],
       "include_globs": [ "*://*.openedu.ru/*" ],
-      "js": [ "js/platform_settings.js", "js/telemetry.js", "js/openedu_shared.js", "js/openedu_content.js" ],
+      "js": [ "js/build_config.js", "js/platform_settings.js", "js/telemetry.js", "js/openedu_shared.js", "js/openedu_course_api.js", "js/openedu_parser.js", "js/openedu_debug_overlay.js", "js/openedu_content.js" ],
       "matches": [ "*://*/*" ],
       "run_at": "document_idle"
    } ],

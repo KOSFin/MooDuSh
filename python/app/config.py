@@ -31,5 +31,13 @@ class Settings(BaseSettings):
     telegram_topic_id: int = Field(default=0, alias='TELEGRAM_TOPIC_ID')
     telegram_proxy_url: str = Field(default='', alias='TELEGRAM_PROXY_URL')
 
+    extension_latest_version: str = Field(default='2.9.0', alias='EXTENSION_LATEST_VERSION')
+    extension_release_url: str = Field(default='', alias='EXTENSION_RELEASE_URL')
+    extension_repository_url: str = Field(default='', alias='EXTENSION_REPOSITORY_URL')
+    extension_required_version: str = Field(default='', alias='EXTENSION_REQUIRED_VERSION')
+    extension_known_build_ids: str = Field(default='', alias='EXTENSION_KNOWN_BUILD_IDS')
+    openedu_known_parser_versions: str = Field(default='', alias='OPENEDU_KNOWN_PARSER_VERSIONS')
+    v2_rate_limit_per_minute: int = Field(default=120, alias='V2_RATE_LIMIT_PER_MINUTE')
+
 
 settings = Settings()

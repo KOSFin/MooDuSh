@@ -1,0 +1,87 @@
+name: Extension CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Create GitHub Release
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python checks in venv
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -r python/requirements.txt
+          python -m compileall -q python/app
+
+  package:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Build extension zip
+        env:
+          OPENEDU_API_BASE_URL: ${{ vars.OPENEDU_API_BASE_URL }}
+          MOODLE_API_BASE_URL: ${{ vars.MOODLE_API_BASE_URL }}
+          BOT_LINK: ${{ vars.BOT_LINK }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+          UPDATE_CHECK_URL: ${{ vars.UPDATE_CHECK_URL }}
+          BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'dev' }}
+          BUILD_ID: ${{ github.sha }}
+          RELEASE_PUBLIC_KEY: ${{ vars.RELEASE_PUBLIC_KEY }}
+        run: npm run build:extension
+      - name: Release manifest
+        env:
+          RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+          BUILD_ID: ${{ github.sha }}
+          BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'dev' }}
+        run: npm run release:manifest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moodush-extension
+          path: |
+            dist/moodush-extension.zip
+            dist/release-manifest.json
+
+  release:
+    runs-on: ubuntu-latest
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: moodush-extension
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/moodush-extension.zip
+            dist/release-manifest.json

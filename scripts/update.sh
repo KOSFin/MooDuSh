@@ -2,26 +2,40 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+REPOSITORY_URL="${REPOSITORY_URL:-https://github.com/KOSFin/MooDuSh-from-syncshare}"
+ARTIFACT_NAME="${ARTIFACT_NAME:-moodush-extension.zip}"
+
 cd "$ROOT_DIR"
 
-echo "MooDuSh: checking repository state..."
-if [ ! -d .git ]; then
-  echo "This directory is not a git repository. Download a fresh ZIP from GitHub instead."
+if command -v curl >/dev/null 2>&1; then
+  DOWNLOADER="curl -fsSL"
+elif command -v wget >/dev/null 2>&1; then
+  DOWNLOADER="wget -qO-"
+else
+  echo "curl or wget is required."
   exit 1
 fi
 
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "Local changes detected. Commit, stash, or copy them before updating."
+API_URL="$(printf '%s' "$REPOSITORY_URL" | sed 's#https://github.com/#https://api.github.com/repos/#')/releases/latest"
+TMP_DIR="$(mktemp -d)"
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+echo "MooDuSh: locating latest GitHub Release..."
+RELEASE_JSON="$($DOWNLOADER "$API_URL")"
+DOWNLOAD_URL="$(printf '%s' "$RELEASE_JSON" | sed -n 's/.*"browser_download_url": "\(.*'"$ARTIFACT_NAME"'\)".*/\1/p' | head -n 1)"
+
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo "Could not find $ARTIFACT_NAME in latest release."
   exit 1
 fi
 
-echo "MooDuSh: downloading the latest version..."
-git pull --ff-only
+echo "MooDuSh: downloading $ARTIFACT_NAME..."
+$DOWNLOADER "$DOWNLOAD_URL" > "$TMP_DIR/$ARTIFACT_NAME"
 
-if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
-  echo "MooDuSh: rebuilding backend containers..."
-  docker compose build backend
-  docker compose up -d
-fi
+echo "MooDuSh: replacing extension files..."
+unzip -oq "$TMP_DIR/$ARTIFACT_NAME" -d "$ROOT_DIR"
 
-echo "Done. If Chrome is open, reload the extension on chrome://extensions/."
+echo "Done. Open chrome://extensions/ and reload MooDuSh."
