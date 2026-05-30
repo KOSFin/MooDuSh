@@ -49,7 +49,7 @@
 
 ### Шаг 1: Скачайте расширение
 
-Откройте последний **GitHub Release** и скачайте `moodush-extension.zip`. Распакуйте архив в удобное место.
+Откройте последний [**GitHub Release**](https://github.com/KOSFin/MooDuSh/releases/latest) и скачайте `moodush-extension.zip`. Распакуйте архив в удобное место.
 
 Для разработки можно клонировать репозиторий:
 
