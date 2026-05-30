@@ -131,10 +131,10 @@
         return '';
     }
 
-    function adjacentHtmlContextPrompt(root) {
+    function adjacentHtmlContext(root) {
         const currentVert = root.closest?.('.vert');
         if (!currentVert) {
-            return '';
+            return { text: '', node: null };
         }
 
         let previous = currentVert.previousElementSibling;
@@ -153,11 +153,15 @@
             const media = mediaToken(previous);
             const candidate = collapseWhitespace([text, media].filter(Boolean).join(' '));
             if (candidate && !SYSTEM_TEXT_RE.test(candidate)) {
-                return candidate;
+                return { text: candidate, node: previous };
             }
         }
 
-        return '';
+        return { text: '', node: null };
+    }
+
+    function adjacentHtmlContextPrompt(root) {
+        return adjacentHtmlContext(root).text;
     }
 
     function deriveAnswerText(input, root) {
@@ -241,7 +245,8 @@
             }
 
             const answerTexts = answerItems.map((item) => item.answerText);
-            const prompt = extractDragPrompt(root, answerTexts) || extractPrompt(root, answerTexts);
+            const context = adjacentHtmlContext(root);
+            const prompt = extractDragPrompt(root, answerTexts, context.text) || extractPrompt(root, answerTexts);
             const questionType = cells.length === 1 ? 'drag_order' : 'drag_table';
             const questionFingerprint = fingerprintQuestion(prompt, answerItems.map((item) => item.answerText));
             const question = {
@@ -255,7 +260,9 @@
                 problemId: root.getAttribute('data-problem-id') || root.id || '',
                 answers: answerItems,
                 sourceFrame: options?.sourceUrl || doc.__PARAMEXT_SOURCE_PATH || '',
-                root
+                root,
+                contextRoot: context.node || null,
+                visualRoot: root.closest?.('.xblock-student_view-multiengine, .xblock-student_view-problem, [data-problem-id], .vert') || root
             };
             question.parseConfidence = confidenceFor(question);
             questions.push(question);
@@ -264,11 +271,11 @@
         return questions;
     }
 
-    function extractDragPrompt(root, answerTexts) {
+    function extractDragPrompt(root, answerTexts, knownContextText) {
         const container = root.closest?.('.xblock-student_view-problem, [data-problem-id], .problems-wrapper, .vert') || root;
         const header = container.querySelector?.('.problem-header, .problem-title, .question-title, h2, h3, h4, legend');
         const headerText = cleanPromptText(textOf(header));
-        const contextText = adjacentHtmlContextPrompt(root);
+        const contextText = typeof knownContextText === 'string' ? knownContextText : adjacentHtmlContextPrompt(root);
         if (headerText && !SYSTEM_TEXT_RE.test(headerText)) {
             return sanitizePrompt(collapseWhitespace([contextText, headerText].filter(Boolean).join(' ')), answerTexts);
         }

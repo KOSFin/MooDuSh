@@ -47,6 +47,16 @@ function sampleBlocksPayload() {
     };
 }
 
+function readCapturedCourseJsonPayloads() {
+    const coursePath = path.join(__dirname, '..', 'test-files', 'response', 'course.json');
+    if (!fs.existsSync(coursePath)) {
+        return [];
+    }
+    const raw = fs.readFileSync(coursePath, 'utf8');
+    return Array.from(raw.matchAll(/response:\n(\{[^\n]*\})/g))
+        .map((match) => JSON.parse(match[1]));
+}
+
 test('OpenEdu V2 course map extracts graded vertical hierarchy from HAR blocks payload', () => {
     const har = readHar();
     const entry = har?.log?.entries?.find((item) => String(item.request?.url || '').includes('/api/courses/v2/blocks/'));
@@ -58,6 +68,27 @@ test('OpenEdu V2 course map extracts graded vertical hierarchy from HAR blocks p
     assert.ok(graded.length > 0);
     assert.ok(graded.some((item) => item.courseId.includes('PHILOSOPHY')));
     assert.ok(graded.every((item) => item.verticalId.includes('type@vertical')));
+});
+
+test('OpenEdu V2 course map reads captured course.json blocks and sequence payloads', { skip: !fs.existsSync(path.join(__dirname, '..', 'test-files', 'response', 'course.json')) }, () => {
+    const payloads = readCapturedCourseJsonPayloads();
+    const blocksPayload = payloads.find((payload) => payload.blocks);
+    const sequencePayload = payloads.find((payload) => Array.isArray(payload.items));
+
+    const blocksMap = courseApi.buildCourseMapFromCapturedPayload('', blocksPayload);
+    const sequenceMap = courseApi.buildCourseMapFromCapturedPayload(
+        'https://courses.openedu.ru/api/courseware/sequence/block-v1:urfu+PHILOSOPHY+spring_2026+type@sequential+block@566d47b22d3348d8ae6a0e8b2627a7bd',
+        sequencePayload,
+    );
+    const merged = courseApi.mergeCourseMaps(blocksMap, sequenceMap);
+    const target = merged.find((item) => item.verticalId === 'block-v1:urfu+PHILOSOPHY+spring_2026+type@vertical+block@68edf4b377694f5086aa4ed3b2a7ad9f');
+
+    assert.ok(blocksMap.length > 100);
+    assert.ok(sequenceMap.length > 0);
+    assert.ok(target);
+    assert.equal(target.chapterTitle, 'Раздел 4. Философия Нового времени');
+    assert.equal(target.sequentialTitle, 'Тема 11. Философия как теория познания');
+    assert.equal(target.verticalTitle, 'Тестовые задания');
 });
 
 test('OpenEdu course id can be derived from block ids in xblock URLs', () => {
@@ -155,6 +186,9 @@ test('OpenEdu V2 parser includes adjacent HTML context for multiengine drag task
     assert.equal(dragQuestions.length, 2);
     assert.match(dragQuestions[0].prompt, /параллельными прямыми/);
     assert.match(dragQuestions[0].prompt, /t3\.5\.png/);
+    assert.ok(dragQuestions[0].contextRoot);
+    assert.ok(dragQuestions[0].visualRoot);
+    assert.match(dragQuestions[0].contextRoot.textContent, /Прямая/);
     assert.match(dragQuestions[1].prompt, /triangle|АВС|ABC/);
     assert.match(dragQuestions[1].prompt, /t3\.6\.png/);
 });

@@ -151,6 +151,7 @@
     let lastEmptySectionRefreshKey = '';
     let lastCourseDiscoveryAt = 0;
     let openeduCourseVerticals = [];
+    let openeduCapturedCourseVerticals = [];
 
     let iframeQuestionsCache = [];
     let topFrameIframeQuestions = null;
@@ -443,6 +444,11 @@
 
     window.addEventListener('message', (event) => {
         if (!event.data || typeof event.data.type !== 'string') return;
+
+        if (event.data.type === 'PARAMEXT_OPENEDU_COURSE_PAYLOAD') {
+            ingestCapturedOpeneduCoursePayload(event.data.url, event.data.payload);
+            return;
+        }
 
         if (isTopFrame) {
             if (event.data.type === 'PARAMEXT_OPENEDU_CONTEXT_REQUEST') {
@@ -796,6 +802,37 @@
         return Boolean(settings?.diagnostics?.openeduDebugOverlay);
     }
 
+    function setDiscoveredCourseVerticals(verticals, source) {
+        const courseApi = window.ParamExtOpeneduCourseApi || {};
+        const incoming = Array.isArray(verticals) ? verticals : [];
+        openeduCourseVerticals = typeof courseApi.mergeCourseMaps === 'function'
+            ? courseApi.mergeCourseMaps(openeduCourseVerticals, incoming)
+            : incoming;
+        lastCourseDiscoveryAt = Date.now();
+        debugSync('course_discovery_update', {
+            source: String(source || 'unknown'),
+            verticalCount: openeduCourseVerticals.length
+        });
+    }
+
+    function ingestCapturedOpeneduCoursePayload(url, payload) {
+        if (!isTopFrame || !payload || typeof payload !== 'object') {
+            return;
+        }
+        const courseApi = window.ParamExtOpeneduCourseApi || {};
+        if (typeof courseApi.buildCourseMapFromCapturedPayload !== 'function') {
+            return;
+        }
+        const verticals = courseApi.buildCourseMapFromCapturedPayload(url, payload);
+        if (!verticals.length) {
+            return;
+        }
+        openeduCapturedCourseVerticals = typeof courseApi.mergeCourseMaps === 'function'
+            ? courseApi.mergeCourseMaps(openeduCapturedCourseVerticals, verticals)
+            : verticals;
+        setDiscoveredCourseVerticals(openeduCapturedCourseVerticals, 'captured-openedu-payload');
+    }
+
     async function refreshCourseDiscovery(force) {
         if (!isTopFrame || !window.ParamExtOpeneduCourseApi || typeof window.ParamExtOpeneduCourseApi.discoverCurrentCourse !== 'function') {
             return;
@@ -804,10 +841,13 @@
         if (!force && openeduCourseVerticals.length > 0 && now - lastCourseDiscoveryAt < 120000) {
             return;
         }
+        if (openeduCapturedCourseVerticals.length > 0) {
+            setDiscoveredCourseVerticals(openeduCapturedCourseVerticals, 'captured-cache');
+            return;
+        }
         try {
             const result = await window.ParamExtOpeneduCourseApi.discoverCurrentCourse();
-            openeduCourseVerticals = Array.isArray(result?.verticals) ? result.verticals : [];
-            lastCourseDiscoveryAt = now;
+            setDiscoveredCourseVerticals(result?.verticals, 'fallback-fetch');
             debugSync('course_discovery_complete', {
                 courseId: result?.courseId || '',
                 verticalCount: openeduCourseVerticals.length
@@ -2314,13 +2354,18 @@
     }
 
     function getAdjacentOpeneduContextPrompt(root) {
+        const context = getAdjacentOpeneduContextNode(root);
+        return context ? normalizePromptCandidateText(promptTextOf(context)) : '';
+    }
+
+    function getAdjacentOpeneduContextNode(root) {
         if (!(root instanceof HTMLElement)) {
-            return '';
+            return null;
         }
 
         const currentVert = root.closest('.vert');
         if (!(currentVert instanceof HTMLElement)) {
-            return '';
+            return null;
         }
 
         let previous = currentVert.previousElementSibling;
@@ -2337,11 +2382,11 @@
 
             const prompt = normalizePromptCandidateText(promptTextOf(previous));
             if (prompt) {
-                return prompt;
+                return previous;
             }
         }
 
-        return '';
+        return null;
     }
 
     function shouldMergeAdjacentOpeneduContext(root, localPrompt) {
@@ -3675,6 +3720,8 @@
                     domSelector: '',
                     ownerDocument: groupRoot.ownerDocument || document,
                     root: groupRoot,
+                    contextRoot: getAdjacentOpeneduContextNode(root),
+                    visualRoot: groupRoot.closest('.xblock-student_view-multiengine, .xblock-student_view-problem, [data-problem-id], .vert') || groupRoot,
                     prompt,
                     correct: byStatus || byOptions,
                     options: normalizedGroupOptions,

@@ -62,6 +62,10 @@
         rootNode.setAttribute('title', text);
     }
 
+    function asElement(value) {
+        return value instanceof Element ? value : null;
+    }
+
     function questionStateText(question) {
         const options = Array.isArray(question?.options) ? question.options : [];
         const selected = options.filter((option) => option.selected).length;
@@ -138,9 +142,17 @@
             if (!rootNode) {
                 return;
             }
+            const visualRoot = asElement(question?.visualRoot) || problemScope(rootNode);
+            const contextRoot = asElement(question?.contextRoot);
             const scope = problemScope(rootNode);
             const promptText = normalizedText(question?.prompt || '');
-            rootNode.setAttribute(ATTR, 'question');
+            visualRoot.setAttribute(ATTR, 'question');
+            if (contextRoot) {
+                contextRoot.setAttribute(ATTR, 'prompt');
+                contextRoot.querySelectorAll('img, svg, canvas, object, embed, p, h1, h2, h3, h4').forEach((node) => {
+                    node.setAttribute(ATTR, 'prompt');
+                });
+            }
             scope.querySelectorAll('.problem-header, .problem-title, .question-title, .problem-group-label, legend, h2, h3, h4, .wrapper-problem-response > p').forEach((node) => {
                 const nodeText = textOf(node);
                 if (!promptText || !nodeText || promptText.includes(nodeText) || nodeText.includes(promptText)) {

@@ -119,6 +119,83 @@
         });
     }
 
+    function stableSyntheticId(prefix, value) {
+        const text = String(value || '').replace(/\s+/g, ' ').trim();
+        if (!text) {
+            return '';
+        }
+        let hash = 2166136261;
+        for (let i = 0; i < text.length; i += 1) {
+            hash ^= text.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return prefix + '@' + (hash >>> 0).toString(16);
+    }
+
+    function buildSequenceMap(sequencePayload, courseId) {
+        const items = Array.isArray(sequencePayload?.items) ? sequencePayload.items : [];
+        const sequentialId = String(sequencePayload?.item_id || sequencePayload?.element_id || '');
+        const sequentialTitle = String(sequencePayload?.sequence_name || sequencePayload?.display_name || '');
+        return items
+            .filter((item) => item?.id && blockKind(item.id) === 'vertical')
+            .map((item) => {
+                const parts = String(item.path || '').split('>').map((part) => part.trim()).filter(Boolean);
+                const chapterTitle = parts.length > 2 ? parts[0] : '';
+                return {
+                    courseId: courseId || findCourseId(item.id),
+                    courseTitle: '',
+                    chapterId: stableSyntheticId('chapter', chapterTitle),
+                    chapterTitle,
+                    sequentialId,
+                    sequentialTitle,
+                    verticalId: String(item.id || ''),
+                    verticalTitle: String(item.page_title || item.display_name || ''),
+                    graded: Boolean(item.graded)
+                };
+            });
+    }
+
+    function mergeCourseMaps(primary, secondary) {
+        function mergeValue(incoming, previous) {
+            return incoming === '' || incoming === null || typeof incoming === 'undefined'
+                ? previous
+                : incoming;
+        }
+
+        function mergeItem(previous, incoming) {
+            const result = Object.assign({}, previous);
+            Object.keys(incoming || {}).forEach((key) => {
+                result[key] = mergeValue(incoming[key], result[key]);
+            });
+            return result;
+        }
+
+        const byVertical = new Map();
+        (Array.isArray(primary) ? primary : []).forEach((item) => {
+            if (item?.verticalId) {
+                byVertical.set(item.verticalId, Object.assign({}, item));
+            }
+        });
+        (Array.isArray(secondary) ? secondary : []).forEach((item) => {
+            if (!item?.verticalId) {
+                return;
+            }
+            const previous = byVertical.get(item.verticalId) || {};
+            byVertical.set(item.verticalId, mergeItem(previous, item));
+        });
+        return Array.from(byVertical.values());
+    }
+
+    function buildCourseMapFromCapturedPayload(url, payload) {
+        if (payload?.blocks && typeof payload.blocks === 'object') {
+            return buildCourseMap(payload);
+        }
+        if (Array.isArray(payload?.items)) {
+            return buildSequenceMap(payload, findCourseId(url));
+        }
+        return [];
+    }
+
     async function fetchJson(url, options) {
         const response = await fetch(url, Object.assign({ credentials: 'include' }, options || {}));
         if (!response.ok) {
@@ -132,7 +209,7 @@
         if (!courseId) {
             return { courseId: '', verticals: [] };
         }
-        const url = 'https://apps.openedu.ru/api/courses/v2/blocks/?course_id=' + encodeURIComponent(courseId) + '&all_blocks=true&depth=all';
+        const url = 'https://courses.openedu.ru/api/courses/v2/blocks/?course_id=' + encodeURIComponent(courseId) + '&all_blocks=true&depth=all';
         const payload = await fetchJson(url);
         return { courseId, verticals: buildCourseMap(payload), raw: payload };
     }
@@ -178,6 +255,9 @@
         courseIdFromBlockId,
         buildVerticalXBlockUrl,
         buildCourseMap,
+        buildSequenceMap,
+        mergeCourseMaps,
+        buildCourseMapFromCapturedPayload,
         fetchVerticalHtml,
         discoverCurrentCourse,
         discoverCurrentCourseFrames

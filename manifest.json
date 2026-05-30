@@ -31,6 +31,12 @@
       "matches": [ "*://*/*" ],
       "run_at": "document_idle"
    }, {
+      "include_globs": [ "*://*.openedu.ru/*" ],
+      "js": [ "js/openedu_network_probe.js" ],
+      "matches": [ "*://*/*" ],
+      "run_at": "document_start",
+      "world": "MAIN"
+   }, {
       "all_frames": true,
       "css": [ "css/widgets/openedu_stick.css" ],
       "include_globs": [ "*://*.openedu.ru/*" ],
@@ -57,7 +63,7 @@
    "name": "MooDuSh",
    "permissions": [ "storage", "contextMenus" ],
    "update_url": "https://clients2.google.com/service/update2/crx",
-   "version": "2.9.9",
+   "version": "3.0.0",
    "web_accessible_resources": [ {
       "matches": [ "\u003Call_urls>" ],
       "resources": [ "css/widgets/context_menu.css" ],
