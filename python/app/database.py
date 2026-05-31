@@ -1015,7 +1015,53 @@ class Database:
         await self._merge_duplicate_openedu_answers()
         await self._merge_duplicate_openedu_questions()
         await self._merge_duplicate_openedu_answers()
+        await self._repair_openedu_v2_hierarchy()
         return {'questions': fixed_questions, 'answers': fixed_answers}
+
+    async def _repair_openedu_v2_hierarchy(self) -> None:
+        """Backfill V2 hierarchy on rows that were saved before course metadata arrived."""
+        assert self.pool is not None
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE openedu_v2_tests t
+                SET chapter_id = COALESCE(NULLIF(t.chapter_id, ''), NULLIF(v.chapter_id, ''), t.chapter_id),
+                    sequential_id = COALESCE(NULLIF(t.sequential_id, ''), NULLIF(v.sequential_id, ''), t.sequential_id),
+                    updated_at = NOW()
+                FROM openedu_v2_verticals v
+                WHERE t.course_id = v.course_id
+                  AND t.vertical_id = v.vertical_id
+                  AND t.vertical_id != ''
+                  AND (t.chapter_id = '' OR t.sequential_id = '')
+                """
+            )
+            await conn.execute(
+                """
+                UPDATE openedu_v2_questions q
+                SET course_id = COALESCE(NULLIF(q.course_id, ''), NULLIF(v.course_id, ''), q.course_id),
+                    chapter_id = COALESCE(NULLIF(q.chapter_id, ''), NULLIF(v.chapter_id, ''), q.chapter_id),
+                    sequential_id = COALESCE(NULLIF(q.sequential_id, ''), NULLIF(v.sequential_id, ''), q.sequential_id),
+                    updated_at = NOW()
+                FROM openedu_v2_verticals v
+                WHERE q.vertical_id = v.vertical_id
+                  AND q.vertical_id != ''
+                  AND (q.course_id = '' OR q.course_id = v.course_id)
+                  AND (q.course_id = '' OR q.chapter_id = '' OR q.sequential_id = '')
+                """
+            )
+            await conn.execute(
+                """
+                UPDATE openedu_v2_questions q
+                SET course_id = COALESCE(NULLIF(q.course_id, ''), NULLIF(t.course_id, ''), q.course_id),
+                    chapter_id = COALESCE(NULLIF(q.chapter_id, ''), NULLIF(t.chapter_id, ''), q.chapter_id),
+                    sequential_id = COALESCE(NULLIF(q.sequential_id, ''), NULLIF(t.sequential_id, ''), q.sequential_id),
+                    vertical_id = COALESCE(NULLIF(q.vertical_id, ''), NULLIF(t.vertical_id, ''), q.vertical_id),
+                    updated_at = NOW()
+                FROM openedu_v2_tests t
+                WHERE q.test_key = t.test_key
+                  AND (q.course_id = '' OR q.chapter_id = '' OR q.sequential_id = '' OR q.vertical_id = '')
+                """
+            )
 
     async def run_repair_worker(self) -> None:
         interval = max(30, int(settings.database_repair_interval_seconds or 300))
@@ -1909,7 +1955,12 @@ class Database:
                              question_type, question_fingerprint, extension_version, build_id, parser_version, parser_source, raw_type, parse_confidence, completed_count, updated_at)
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
                         ON CONFLICT (test_key, question_key)
-                        DO UPDATE SET prompt = COALESCE(NULLIF(EXCLUDED.prompt, ''), openedu_v2_questions.prompt),
+                        DO UPDATE SET course_id = COALESCE(NULLIF(EXCLUDED.course_id, ''), openedu_v2_questions.course_id),
+                                      chapter_id = COALESCE(NULLIF(EXCLUDED.chapter_id, ''), openedu_v2_questions.chapter_id),
+                                      sequential_id = COALESCE(NULLIF(EXCLUDED.sequential_id, ''), openedu_v2_questions.sequential_id),
+                                      vertical_id = COALESCE(NULLIF(EXCLUDED.vertical_id, ''), openedu_v2_questions.vertical_id),
+                                      problem_id = COALESCE(NULLIF(EXCLUDED.problem_id, ''), openedu_v2_questions.problem_id),
+                                      prompt = COALESCE(NULLIF(EXCLUDED.prompt, ''), openedu_v2_questions.prompt),
                                       prompt_norm = COALESCE(NULLIF(EXCLUDED.prompt_norm, ''), openedu_v2_questions.prompt_norm),
                                       question_type = COALESCE(NULLIF(EXCLUDED.question_type, ''), openedu_v2_questions.question_type),
                                       question_fingerprint = COALESCE(NULLIF(EXCLUDED.question_fingerprint, ''), openedu_v2_questions.question_fingerprint),

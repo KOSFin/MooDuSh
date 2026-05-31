@@ -934,9 +934,31 @@
         return match ? ('course-v1:' + match[1] + '+' + match[2] + '+' + match[3]) : '';
     }
 
+    function getElementUsageId(element, kind) {
+        if (!(element instanceof Element)) {
+            return '';
+        }
+        const selector = kind
+            ? '[data-usage-id*="type@' + kind + '"], [data-id*="type@' + kind + '"], [data-problem-id*="type@' + kind + '"]'
+            : '[data-usage-id], [data-id], [data-problem-id]';
+        const node = element.matches(selector) ? element : element.closest(selector);
+        return String(
+            node?.getAttribute('data-usage-id')
+            || node?.getAttribute('data-id')
+            || node?.getAttribute('data-problem-id')
+            || ''
+        );
+    }
+
+    function getQuestionVerticalBlockId(question) {
+        return getElementUsageId(question?.root, 'vertical')
+            || getElementUsageId(question?.visualRoot, 'vertical')
+            || extractOpeneduBlockId(question?.sourcePath || '');
+    }
+
     function getCourseRefForQuestion(question) {
         const source = String(question?.sourcePath || location.href || '');
-        const verticalId = extractOpeneduBlockId(source)
+        const verticalId = getQuestionVerticalBlockId(question)
             || extractOpeneduBlockId(location.href)
             || extractOpeneduBlockId(document.referrer || '');
         const courseId = findOpeneduCourseId(location.href)
@@ -1704,9 +1726,15 @@
             return null;
         }
 
+        const verticalUsageId = getElementUsageId(host, 'vertical');
+        const hostUsageId = host.getAttribute('data-usage-id')
+            || host.getAttribute('data-problem-id')
+            || host.getAttribute('data-id')
+            || host.id
+            || '';
         parsedDoc.__PARAMEXT_VIRTUAL_CONTENT = true;
-        parsedDoc.__PARAMEXT_SOURCE_PATH = host.ownerDocument?.location?.pathname || location.pathname;
-        parsedDoc.__PARAMEXT_HOST_PROBLEM_ID = host.getAttribute('data-problem-id') || host.id || '';
+        parsedDoc.__PARAMEXT_SOURCE_PATH = verticalUsageId || hostUsageId || host.ownerDocument?.location?.pathname || location.pathname;
+        parsedDoc.__PARAMEXT_HOST_PROBLEM_ID = hostUsageId;
         virtualContentDocsByHost.set(host, { rawContent, doc: parsedDoc });
         return parsedDoc;
     }
