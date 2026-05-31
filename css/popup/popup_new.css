@@ -58,6 +58,8 @@ body {
 }
 
 .icon-btn {
+    display: inline-grid;
+    place-items: center;
     width: 32px;
     height: 32px;
     border: 1px solid #d0d6e0;
@@ -67,6 +69,14 @@ body {
     font-size: 15px;
     font-weight: 800;
     cursor: pointer;
+    text-decoration: none;
+}
+
+.telegram-btn img {
+    width: 19px;
+    height: 19px;
+    display: block;
+    object-fit: contain;
 }
 
 .version-pill {

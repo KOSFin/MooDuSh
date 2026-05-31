@@ -6,6 +6,8 @@
     let settings = {
         mode: 'wand',
         wandHotkey: 'Escape',
+        insertHotkey: 'Alt+KeyA',
+        autoInsertOnLoad: true,
         nextButtonText: 'Следующая страница',
         autoSolving: false
     };
@@ -16,6 +18,8 @@
             settings = {
                 mode: merged.moodle.mode,
                 wandHotkey: merged.moodle.wandHotkey,
+                insertHotkey: merged.moodle.insertHotkey,
+                autoInsertOnLoad: merged.moodle.autoInsertOnLoad,
                 nextButtonText: merged.moodle.nextButtonText,
                 autoSolving: merged.moodle.autoSolving
             };
@@ -28,6 +32,8 @@
                 settings = {
                     mode: data.paramExtSettings.mode || settings.mode,
                     wandHotkey: data.paramExtSettings.wandKey || settings.wandHotkey,
+                    insertHotkey: data.paramExtSettings.insertKey || settings.insertHotkey,
+                    autoInsertOnLoad: data.paramExtSettings.autoInsertOnLoad !== false,
                     nextButtonText: data.paramExtSettings.nextBtnText || settings.nextButtonText,
                     autoSolving: Boolean(data.paramExtSettings.autoSolving)
                 };
@@ -100,6 +106,20 @@
         }
     }
 
+    function applyQueuedAnswers() {
+        const api = window.ParamExtMoodleAutoInsert;
+        if (!api || typeof api.apply !== 'function') {
+            return 0;
+        }
+
+        try {
+            return Number(api.apply()) || 0;
+        } catch (error) {
+            console.error(error);
+            return 0;
+        }
+    }
+
     function hasAnsweredDataOnPage() {
         const checkedOptions = document.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked');
         if (checkedOptions.length > 0) {
@@ -150,6 +170,8 @@
                 settings = {
                     mode: message.settings.moodle.mode,
                     wandHotkey: message.settings.moodle.wandHotkey,
+                    insertHotkey: message.settings.moodle.insertHotkey,
+                    autoInsertOnLoad: message.settings.moodle.autoInsertOnLoad,
                     nextButtonText: message.settings.moodle.nextButtonText,
                     autoSolving: Boolean(message.settings.moodle.autoSolving)
                 };
@@ -157,6 +179,8 @@
                 settings = {
                     mode: message.settings.mode || settings.mode,
                     wandHotkey: message.settings.wandKey || settings.wandHotkey,
+                    insertHotkey: message.settings.insertKey || settings.insertHotkey,
+                    autoInsertOnLoad: message.settings.autoInsertOnLoad !== false,
                     nextButtonText: message.settings.nextBtnText || settings.nextButtonText,
                     autoSolving: Boolean(message.settings.autoSolving)
                 };
@@ -178,9 +202,20 @@
 
     document.addEventListener('keydown', (event) => {
         if (window.ParamExtSettings) {
+            if (window.ParamExtSettings.hotkeyMatches(event, settings.insertHotkey)) {
+                event.preventDefault();
+                applyQueuedAnswers();
+                return;
+            }
             if (window.ParamExtSettings.hotkeyMatches(event, settings.wandHotkey)) {
                 toggleWands();
             }
+            return;
+        }
+
+        if (event.code === settings.insertHotkey || event.key === settings.insertHotkey) {
+            event.preventDefault();
+            applyQueuedAnswers();
             return;
         }
 
@@ -195,6 +230,7 @@
         window.ParamExtTelemetry.push('system_state', {
             mode: settings.mode,
             autoSolving: settings.autoSolving,
+            autoInsertOnLoad: settings.autoInsertOnLoad,
             host: location.host
         }, 'moodle-content');
     }

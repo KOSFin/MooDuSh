@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         mainLogo: $('mainLogo'),
         headerStatus: $('headerStatus'),
         versionPill: $('versionPill'),
+        telegramChannelLink: $('telegramChannelLink'),
         openSetupBtn: $('openSetupBtn'),
         privacyScreen: $('privacyScreen'),
         openPrivacyBtn: $('openPrivacyBtn'),
@@ -46,6 +47,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         btnStart: $('btnStart'),
         btnStop: $('btnStop'),
         wandKey: $('wandKey'),
+        moodleAutoInsertOnLoad: $('moodleAutoInsertOnLoad'),
+        moodleInsertKey: $('moodleInsertKey'),
         nextBtnSelector: $('nextBtnSelector'),
         openeduHotkey: $('openeduHotkey'),
         openeduStickOptions: $('openeduStickOptions'),
@@ -80,6 +83,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     refs.versionPill.textContent = 'v' + (manifest.version || 'unknown');
     refs.buildStatus.textContent = String(buildConfig.buildChannel || 'local') + ' / ' + String(buildConfig.buildId || 'local-dev').slice(0, 8);
+    refs.telegramChannelLink.href = buildConfig.telegramChannelLink || buildConfig.telegramLink || buildConfig.botLink || 'https://t.me/moodush_bot';
     refs.botLink.href = buildConfig.botLink || 'https://t.me/moodush_bot';
     refs.mainLogo?.addEventListener('error', () => {
         refs.mainLogo.src = '../../logo_main.png';
@@ -197,6 +201,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         setRadio('openeduMode', settings.openedu.mode);
         setRadio('moodleMode', settings.moodle.mode);
         refs.wandKey.value = settings.moodle.wandHotkey;
+        refs.moodleAutoInsertOnLoad.checked = settings.moodle.autoInsertOnLoad !== false;
+        refs.moodleInsertKey.value = settings.moodle.insertHotkey;
         refs.nextBtnSelector.value = settings.moodle.nextButtonText;
         refs.openeduHotkey.value = settings.openedu.stickHotkey;
         refs.openeduAutoAdvanceEnabled.checked = settings.openedu.autoAdvanceEnabled;
@@ -233,6 +239,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         next.moodle.mode = radioValue('moodleMode', next.moodle.mode);
         next.moodle.wandHotkey = refs.wandKey.value.trim() || next.moodle.wandHotkey;
+        next.moodle.autoInsertOnLoad = refs.moodleAutoInsertOnLoad.checked;
+        next.moodle.insertHotkey = refs.moodleInsertKey.value.trim() || next.moodle.insertHotkey;
         next.moodle.nextButtonText = refs.nextBtnSelector.value.trim() || next.moodle.nextButtonText;
 
         next.openedu.mode = radioValue('openeduMode', next.openedu.mode);
@@ -492,6 +500,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     [
         refs.nextBtnSelector,
+        refs.moodleAutoInsertOnLoad,
         refs.openeduAutoAdvanceDelayMs,
         refs.openeduAutoAdvanceEnabled,
         refs.openeduRequiredCompletionOnly,
@@ -518,6 +527,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         scheduleAppSave('moodle-mode');
     }));
     bindHotkey(refs.wandKey);
+    bindHotkey(refs.moodleInsertKey);
     bindHotkey(refs.openeduHotkey);
 
     applyStateToUi();

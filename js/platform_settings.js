@@ -28,6 +28,8 @@
         moodle: {
             mode: 'wand',
             wandHotkey: 'Escape',
+            insertHotkey: 'Alt+KeyA',
+            autoInsertOnLoad: true,
             nextButtonText: 'Следующая страница',
             autoSolving: false,
             hideWidgetByDefault: false
@@ -119,6 +121,8 @@
                 next.moodle.mode = moodle.mode;
             }
             next.moodle.wandHotkey = normalizeHotkey(moodle.wandHotkey, next.moodle.wandHotkey);
+            next.moodle.insertHotkey = normalizeHotkey(moodle.insertHotkey, next.moodle.insertHotkey);
+            next.moodle.autoInsertOnLoad = moodle.autoInsertOnLoad !== false;
             if (typeof moodle.nextButtonText === 'string' && moodle.nextButtonText.trim().length > 0) {
                 next.moodle.nextButtonText = moodle.nextButtonText.trim();
             }
@@ -181,6 +185,8 @@
         return {
             mode: normalized.moodle.mode,
             wandKey: normalized.moodle.wandHotkey,
+            insertKey: normalized.moodle.insertHotkey,
+            autoInsertOnLoad: normalized.moodle.autoInsertOnLoad,
             nextBtnText: normalized.moodle.nextButtonText,
             autoSolving: normalized.moodle.autoSolving,
             hideWidgetByDefault: normalized.moodle.hideWidgetByDefault,
@@ -234,6 +240,12 @@
             }
             if (typeof legacy.wandKey === 'string' && legacy.wandKey.trim().length > 0) {
                 migrated.moodle.wandHotkey = legacy.wandKey.trim();
+            }
+            if (typeof legacy.insertKey === 'string' && legacy.insertKey.trim().length > 0) {
+                migrated.moodle.insertHotkey = legacy.insertKey.trim();
+            }
+            if (Object.prototype.hasOwnProperty.call(legacy, 'autoInsertOnLoad')) {
+                migrated.moodle.autoInsertOnLoad = legacy.autoInsertOnLoad !== false;
             }
             if (typeof legacy.nextBtnText === 'string' && legacy.nextBtnText.trim().length > 0) {
                 migrated.moodle.nextButtonText = legacy.nextBtnText.trim();

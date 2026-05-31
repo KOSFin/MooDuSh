@@ -18,6 +18,9 @@
                 </div>
             </div>
             <div class="header-actions">
+                <a href="https://t.me/moodush_news" id="telegramChannelLink" class="icon-btn telegram-btn" target="_blank" rel="noopener" title="Telegram-канал MooDuSh" aria-label="Telegram-канал MooDuSh">
+                    <img src="../../icons/telegram.png" alt="">
+                </a>
                 <button type="button" id="openSetupBtn" class="icon-btn" title="Подключение и backend">⚙</button>
                 <div class="version-pill" id="versionPill">v...</div>
             </div>
@@ -139,8 +142,16 @@
                     <button id="btnStop" class="btn btn-sm btn-danger hidden" type="button">Стоп</button>
                 </div>
                 <label class="field">
-                    <span>Горячая клавиша</span>
+                    <span>Клавиша палочки</span>
                     <input type="text" id="wandKey" class="hotkey-input" readonly>
+                </label>
+                <label class="check-row">
+                    <input type="checkbox" id="moodleAutoInsertOnLoad">
+                    <span>Вставлять ответы после загрузки</span>
+                </label>
+                <label class="field">
+                    <span>Клавиша вставки ответов</span>
+                    <input type="text" id="moodleInsertKey" class="hotkey-input" readonly>
                 </label>
                 <label class="field">
                     <span>Текст кнопки далее</span>
