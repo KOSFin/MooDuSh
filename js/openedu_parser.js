@@ -172,6 +172,9 @@
             }
             return sanitizeAnswer(input.value || '');
         }
+        if (input.tagName.toLowerCase() === 'select') {
+            return selectedOptionText(input);
+        }
         const id = input.getAttribute('id') || '';
         const label = id ? root.querySelector('label[for="' + cssEscape(id) + '"]') : input.closest('label');
         const text = sanitizeAnswer(textOf(label) || mediaToken(label || input) || input.getAttribute('value') || '');
@@ -183,6 +186,38 @@
             return root.CSS.escape(String(value || ''));
         }
         return String(value || '').replace(/"/g, '\\"');
+    }
+
+    function isSelectPlaceholderOption(option) {
+        if (!option) {
+            return false;
+        }
+        const value = collapseWhitespace(option.getAttribute?.('value') || option.value || '').toLowerCase();
+        const text = collapseWhitespace(textOf(option) || option.label || '').toLowerCase();
+        if (option.disabled) {
+            return true;
+        }
+        if (!text && !value) {
+            return true;
+        }
+        return (value === '' || /dummy|placeholder|default/.test(value)) && /(выберите|choose|select)/.test(text);
+    }
+
+    function selectedOptionText(select) {
+        const selected = Array.from(select.options || [])
+            .filter((option) => option && option.selected && !isSelectPlaceholderOption(option))
+            .map((option) => sanitizeAnswer(textOf(option) || option.label || option.value || ''))
+            .filter(Boolean);
+        return selected.join(' / ');
+    }
+
+    function isInputSelected(input) {
+        const tag = String(input.tagName || '').toLowerCase();
+        const type = String(input.type || '').toLowerCase();
+        if (tag === 'select') {
+            return Boolean(selectedOptionText(input));
+        }
+        return Boolean(input.checked || (input.value && type === 'text'));
     }
 
     function getQuestionType(inputs) {
@@ -334,6 +369,9 @@
         }
 
         const clone = block.cloneNode(true);
+        clone.querySelectorAll('input[type="text"], textarea, select').forEach((node) => {
+            node.replaceWith((clone.ownerDocument || document).createTextNode(' ____ '));
+        });
         clone.querySelectorAll([
             'script',
             'style',
@@ -410,7 +448,7 @@
                     answerKey,
                     answerText,
                     inputType: input.type || input.tagName.toLowerCase(),
-                    selected: Boolean(input.checked || (input.value && input.type === 'text')),
+                    selected: isInputSelected(input),
                     correct: /\b(correct|choicegroup_correct)\b/i.test(input.className || ''),
                     incorrect: /\b(incorrect|choicegroup_incorrect)\b/i.test(input.className || ''),
                     answerFingerprint: hashText(answerText || answerKey)

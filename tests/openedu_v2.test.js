@@ -205,3 +205,18 @@ test('OpenEdu V2 parser includes adjacent HTML context for multiengine drag task
     assert.match(dragQuestions[1].prompt, /triangle|АВС|ABC/);
     assert.match(dragQuestions[1].prompt, /t3\.6\.png/);
 });
+
+test('OpenEdu V2 parser keeps inline select gap-fill questions together', { skip: !fs.existsSync(path.join(__dirname, '..', 'test-files', 'test20.html')) }, () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'test-files', 'test20.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://apps.openedu.ru/' });
+    const questions = parser.parseDocumentTree(dom.window.document, { sourceUrl: 'test20.html' });
+    const gapFill = questions.find((question) => question.prompt.includes('Опираясь на текст лекции'));
+
+    assert.ok(gapFill);
+    assert.equal(gapFill.questionType, 'select');
+    assert.match(gapFill.prompt, /____ познания лежит ____/);
+    assert.deepEqual(
+        gapFill.answers.filter((answer) => answer.selected).map((answer) => answer.answerText),
+        ['достоверного', 'опыт', 'разуме', 'игнорирование', 'эмпиризма'],
+    );
+});

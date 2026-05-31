@@ -9,6 +9,7 @@
     const QUESTION_INPUT_SELECTOR = 'input[type="radio"], input[type="checkbox"], input[type="text"], input[type="hidden"], select, textarea.answer, textarea[name="answer"]';
     const QUESTION_ROOT_SELECTOR = '[data-problem-id], .problem, .xblock-student_view-problem, .problems-wrapper, .wrapper-problem-response, fieldset, [role="group"], .choicegroup, [id^="problem_"]';
     const QUESTION_GROUP_SELECTOR = 'fieldset, .question, .subquestion, .problem-question, .wrapper-problem-response, .choicegroup, .answers, .options, .response, .answer';
+    const MULTI_INPUT_GROUP_SELECTOR = '.multi-inputs-group';
     const OPTION_LABEL_SELECTOR = 'label.response-label, label.field-label, .choicegroup label[for], label[for], label';
     const PARAMEXT_WIDGET_SELECTOR = [
         '.moodush-openedu-inline-menu',
@@ -1735,6 +1736,7 @@
         parsedDoc.__PARAMEXT_VIRTUAL_CONTENT = true;
         parsedDoc.__PARAMEXT_SOURCE_PATH = verticalUsageId || hostUsageId || host.ownerDocument?.location?.pathname || location.pathname;
         parsedDoc.__PARAMEXT_HOST_PROBLEM_ID = hostUsageId;
+        parsedDoc.__PARAMEXT_VIRTUAL_HOST = host;
         virtualContentDocsByHost.set(host, { rawContent, doc: parsedDoc });
         return parsedDoc;
     }
@@ -3077,6 +3079,40 @@
         return root;
     }
 
+    function getMultiInputGroupContainer(root, input) {
+        if (!(root instanceof HTMLElement) || !(input instanceof Element)) {
+            return null;
+        }
+
+        const group = input.closest(MULTI_INPUT_GROUP_SELECTOR);
+        if (!(group instanceof HTMLElement) || !root.contains(group)) {
+            return null;
+        }
+
+        return group.querySelectorAll('select, input[type="text"], textarea').length > 1 ? group : null;
+    }
+
+    function getMultiInputPrompt(root) {
+        if (!(root instanceof HTMLElement) || !root.matches(MULTI_INPUT_GROUP_SELECTOR)) {
+            return '';
+        }
+
+        const clone = root.cloneNode(true);
+        if (!(clone instanceof HTMLElement)) {
+            return '';
+        }
+
+        clone.querySelectorAll('select, input[type="text"], textarea').forEach((node) => {
+            node.replaceWith((clone.ownerDocument || document).createTextNode(' ____ '));
+        });
+        clone.querySelectorAll('.indicator-container, .status, .status-icon, .answer, .message').forEach((node) => {
+            node.remove();
+        });
+
+        return normalizePromptCandidateText(promptTextOf(clone))
+            || normalizePromptLikeText(promptTextOf(clone));
+    }
+
     function findPromptBeforeNode(root, node) {
         if (!(root instanceof HTMLElement) || !(node instanceof Element)) {
             return '';
@@ -3196,10 +3232,11 @@
 
             const inputId = select.id || '';
             const inputName = String(select.name || '').trim();
-            const groupContainer = getInputGroupContainer(root, select);
+            const multiInputGroup = getMultiInputGroupContainer(root, select);
+            const groupContainer = multiInputGroup || getInputGroupContainer(root, select);
             const groupPath = groupContainer && groupContainer !== root ? buildElementPath(root, groupContainer) : '';
             const groupKey = groupPath
-                ? ('c:' + groupPath)
+                ? ((multiInputGroup ? 'multi-select:' : 'c:') + groupPath)
                 : (inputName ? ('s:' + inputName) : ('s:' + String(sidx)));
             const inputPath = buildElementPath(root, select);
 
@@ -3225,7 +3262,9 @@
                 }
 
                 const optionValue = collapseWhitespace(optionNode.value || '');
-                const dedupeKey = groupKey + '|' + (optionValue || answerText);
+                const dedupeKey = groupKey + '|'
+                    + (multiInputGroup ? (inputPath + '|') : '')
+                    + (optionValue || answerText);
                 if (usedKeys.has(dedupeKey)) {
                     return;
                 }
@@ -3835,6 +3874,7 @@
                 const contextualNearPrompt = nearPrompt ? mergePromptWithAdjacentContext(root, nearPrompt) : '';
                 const prompt = sanitizeQuestionPromptText(
                     (getMatchingTableData(groupRoot) ? getMatchingTablePrompt(groupRoot) : '')
+                        || getMultiInputPrompt(groupRoot)
                         || contextualNearPrompt
                         || getQuestionPrompt(groupRoot)
                         || fallbackPrompt,
@@ -3875,8 +3915,11 @@
                     domSelector: '',
                     ownerDocument: groupRoot.ownerDocument || document,
                     root: groupRoot,
+                    liveRoot: ownerDoc.__PARAMEXT_VIRTUAL_HOST || null,
                     contextRoot: getAdjacentOpeneduContextNode(root),
-                    visualRoot: groupRoot.closest('.xblock-student_view-multiengine, .xblock-student_view-problem, [data-problem-id], .vert') || groupRoot,
+                    visualRoot: ownerDoc.__PARAMEXT_VIRTUAL_HOST
+                        || groupRoot.closest('.xblock-student_view-multiengine, .xblock-student_view-problem, [data-problem-id], .vert')
+                        || groupRoot,
                     prompt,
                     correct: byStatus || byOptions,
                     options: normalizedGroupOptions,
@@ -3933,6 +3976,7 @@
                 domSelector: item.domSelector,
                 ownerDocument: item.ownerDocument,
                 root: item.root,
+                liveRoot: item.liveRoot || null,
                 prompt: item.prompt,
                 correct: item.correct,
                 options: item.options,
@@ -4054,8 +4098,28 @@
     }
 
     function locateQuestionBlock(question) {
+        if (question?.fromVirtualContent) {
+            if (question.liveRoot instanceof HTMLElement && question.liveRoot.isConnected) {
+                return question.liveRoot;
+            }
+
+            const virtualHost = question.ownerDocument?.__PARAMEXT_VIRTUAL_HOST;
+            if (virtualHost instanceof HTMLElement && virtualHost.isConnected) {
+                return virtualHost;
+            }
+        }
+
         if (question.root instanceof HTMLElement && question.root.isConnected) {
             return question.root;
+        }
+
+        if (question.liveRoot instanceof HTMLElement && question.liveRoot.isConnected) {
+            return question.liveRoot;
+        }
+
+        const virtualHost = question.ownerDocument?.__PARAMEXT_VIRTUAL_HOST;
+        if (virtualHost instanceof HTMLElement && virtualHost.isConnected) {
+            return virtualHost;
         }
 
         const doc = question.ownerDocument || document;
@@ -4338,6 +4402,12 @@
         }
         const multiSelects = block.querySelectorAll('select[multiple]');
         if (multiSelects.length > 0) {
+            return true;
+        }
+        const multiInputSelects = block.matches?.(MULTI_INPUT_GROUP_SELECTOR)
+            ? block.querySelectorAll('select')
+            : block.querySelectorAll(MULTI_INPUT_GROUP_SELECTOR + ' select');
+        if (multiInputSelects.length > 1) {
             return true;
         }
         const checkboxes = block.querySelectorAll('input[type="checkbox"]');
@@ -4901,8 +4971,20 @@
             return false;
         }
 
-        const select = findSelectForOption(block, targets[0]);
-        if (!(select instanceof HTMLSelectElement)) {
+        const modeName = typeof mode === 'string' ? mode : 'add';
+        const targetsBySelect = new Map();
+        targets.forEach((target) => {
+            const select = findSelectForOption(block, target);
+            if (!(select instanceof HTMLSelectElement)) {
+                return;
+            }
+            if (!targetsBySelect.has(select)) {
+                targetsBySelect.set(select, []);
+            }
+            targetsBySelect.get(select).push(target);
+        });
+
+        if (targetsBySelect.size === 0) {
             debugSync('apply_answers_failed', {
                 reason: 'select_not_found',
                 questionKey: question?.questionKey || ''
@@ -4910,60 +4992,76 @@
             return false;
         }
 
-        const modeName = typeof mode === 'string' ? mode : 'add';
-        const targetValues = new Set();
-        const targetTexts = new Set();
-        targets.forEach((target) => {
-            const value = normalizeText(target?.inputValue || '');
-            const text = normalizeText(target?.answerText || '');
-            if (value) {
-                targetValues.add(value);
-            }
-            if (text) {
-                targetTexts.add(text);
-            }
-        });
-
-        const optionNodes = Array.from(select.options || []).filter((item) => item instanceof HTMLOptionElement);
-        const shouldSelectOption = (optionNode) => {
-            if (isSelectPlaceholderOption(optionNode)) {
-                return false;
-            }
-            const optionValue = normalizeText(optionNode.value || '');
-            const optionText = normalizeText(getSelectOptionAnswerText(optionNode));
-            return targetValues.has(optionValue) || targetTexts.has(optionText);
-        };
-
-        if (select.multiple && modeName !== 'set-all') {
-            optionNodes.forEach((optionNode) => {
-                if (shouldSelectOption(optionNode)) {
-                    optionNode.selected = true;
+        let appliedCount = 0;
+        targetsBySelect.forEach((selectTargets, select) => {
+            const targetValues = new Set();
+            const targetTexts = new Set();
+            selectTargets.forEach((target) => {
+                const value = normalizeText(target?.inputValue || '');
+                const text = normalizeText(target?.answerText || '');
+                if (value) {
+                    targetValues.add(value);
+                }
+                if (text) {
+                    targetTexts.add(text);
                 }
             });
-        } else if (select.multiple || modeName === 'set-all') {
-            optionNodes.forEach((optionNode) => {
-                optionNode.selected = shouldSelectOption(optionNode);
-            });
-        } else {
-            const selectedOption = optionNodes.find((optionNode) => shouldSelectOption(optionNode)) || null;
-            if (!selectedOption) {
-                debugSync('apply_answers_failed', {
-                    reason: 'select_option_not_found',
-                    questionKey: question?.questionKey || ''
+
+            const optionNodes = Array.from(select.options || []).filter((item) => item instanceof HTMLOptionElement);
+            const shouldSelectOption = (optionNode) => {
+                if (isSelectPlaceholderOption(optionNode)) {
+                    return false;
+                }
+                const optionValue = normalizeText(optionNode.value || '');
+                const optionText = normalizeText(getSelectOptionAnswerText(optionNode));
+                return targetValues.has(optionValue) || targetTexts.has(optionText);
+            };
+
+            let changed = false;
+            if (select.multiple && modeName !== 'set-all') {
+                optionNodes.forEach((optionNode) => {
+                    if (shouldSelectOption(optionNode)) {
+                        optionNode.selected = true;
+                        changed = true;
+                    }
                 });
-                return false;
+            } else if (select.multiple) {
+                optionNodes.forEach((optionNode) => {
+                    optionNode.selected = shouldSelectOption(optionNode);
+                });
+                changed = true;
+            } else {
+                const selectedOption = optionNodes.find((optionNode) => shouldSelectOption(optionNode)) || null;
+                if (!selectedOption) {
+                    return;
+                }
+                select.value = selectedOption.value;
+                selectedOption.selected = true;
+                changed = true;
             }
-            select.value = selectedOption.value;
-            selectedOption.selected = true;
+
+            if (!changed) {
+                return;
+            }
+            appliedCount += 1;
+            select.dispatchEvent(new Event('input', { bubbles: true }));
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            notifyQuestionAnswerChanged(block, select);
+        });
+
+        if (appliedCount === 0) {
+            debugSync('apply_answers_failed', {
+                reason: 'select_option_not_found',
+                questionKey: question?.questionKey || ''
+            });
+            return false;
         }
 
-        select.dispatchEvent(new Event('input', { bubbles: true }));
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-        notifyQuestionAnswerChanged(block, select);
         highlightQuestionBlock(block);
         debugSync('apply_answers_success', {
             questionKey: question?.questionKey || '',
             mode: 'select',
+            selectCount: appliedCount,
             selected: targets.map((item) => ({
                 answerKey: item.answerKey,
                 answerText: item.answerText
@@ -6325,10 +6423,6 @@
         }
 
         questions.forEach((question) => {
-            if (question?.fromVirtualContent) {
-                return;
-            }
-
             const block = locateQuestionBlock(question);
             if (!block) {
                 return;
@@ -6451,7 +6545,7 @@
             applyVerified.addEventListener('click', () => {
                 const payload = isMulti ? verifiedAnswers : [verifiedAnswers[0]];
                 const mode = 'set-all';
-                const applied = applyAnswersToQuestion(question, payload, mode);
+                const applied = requestApplyAnswers(question, payload, mode);
                 if (!applied) {
                     maybeLogBackendIssue('openedu_apply_failed', {
                         questionKey: question.questionKey,
@@ -6473,7 +6567,7 @@
                 applyFallback.addEventListener('click', () => {
                     const payload = isMulti ? fallbackAnswers : [fallbackAnswers[0]];
                     const mode = 'set-all';
-                    const applied = applyAnswersToQuestion(question, payload, mode);
+                    const applied = requestApplyAnswers(question, payload, mode);
                     if (!applied) {
                         maybeLogBackendIssue('openedu_apply_failed', {
                             questionKey: question.questionKey,
@@ -6516,7 +6610,7 @@
                         : (answer.incorrectCount > 0 ? (answer.answerText + ' ✕') : answer.answerText);
                     answerBtn.title = 'Вставить этот вариант';
                     answerBtn.addEventListener('click', () => {
-                        const applied = applyAnswersToQuestion(question, [answer], 'set-all');
+                        const applied = requestApplyAnswers(question, [answer], 'set-all');
                         if (!applied) {
                             maybeLogBackendIssue('openedu_apply_failed', {
                                 questionKey: question.questionKey,
