@@ -90,7 +90,7 @@
                         <span class="badge badge-green">{{ ch.question_count }} questions</span>
                     </span>
                     <span class="tree-summary-actions" data-no-toggle>
-                        <form method="post" action="/admin/v2/chapters/delete" class="inline-form" data-ajax-delete data-remove-target="[data-admin-delete-row]">
+                        <form method="post" action="/admin/v2/chapters/delete" class="inline-form" data-ajax-delete data-remove-target="[data-admin-delete-row]" data-confirm="Удалить этот раздел V2 вместе с вопросами, ответами и попытками?">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <input type="hidden" name="course_id" value="{{ data.course.course_id }}">
                             <input type="hidden" name="chapter_id" value="{{ ch.chapter_id }}">
@@ -111,7 +111,7 @@
                                     <span class="badge badge-green">{{ seq.question_count }} questions</span>
                                 </span>
                                 <span class="tree-summary-actions" data-no-toggle>
-                                    <form method="post" action="/admin/v2/sequentials/delete" class="inline-form" data-ajax-delete data-remove-target="[data-admin-delete-row]">
+                                    <form method="post" action="/admin/v2/sequentials/delete" class="inline-form" data-ajax-delete data-remove-target="[data-admin-delete-row]" data-confirm="Удалить эту тему V2 вместе с вопросами, ответами и попытками?">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                         <input type="hidden" name="course_id" value="{{ data.course.course_id }}">
                                         <input type="hidden" name="sequential_id" value="{{ seq.sequential_id }}">
@@ -137,7 +137,7 @@
                                                 <article class="compact-question" data-question-card data-admin-delete-row>
                                                     <div class="compact-question-head">
                                                         <div class="question-prompt">{{ q.prompt or q.question_key }}</div>
-                                                        <form method="post" action="/admin/v2/questions/delete" class="inline-form" data-ajax-delete data-remove-target="[data-admin-delete-row]">
+                                                        <form method="post" action="/admin/v2/questions/delete" class="inline-form" data-ajax-delete data-remove-target="[data-admin-delete-row]" data-confirm="Удалить этот вопрос V2 вместе с ответами и статистикой?">
                                                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                                             <input type="hidden" name="course_id" value="{{ data.course.course_id }}">
                                                             <input type="hidden" name="test_key" value="{{ q.test_key }}">
@@ -232,7 +232,7 @@
                         <div class="metric"><span>Верно</span><strong>{{ q.verified_count }}</strong></div>
                         <div class="metric"><span>Fallback</span><strong>{{ q.fallback_count }}</strong></div>
                         <div class="metric"><span>Bad</span><strong>{{ q.incorrect_count }}</strong></div>
-                        <form method="post" action="/admin/v2/questions/delete" class="metric-action" data-ajax-delete data-remove-target="[data-admin-delete-row]">
+                        <form method="post" action="/admin/v2/questions/delete" class="metric-action" data-ajax-delete data-remove-target="[data-admin-delete-row]" data-confirm="Удалить этот вопрос V2 вместе с ответами и статистикой?">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <input type="hidden" name="course_id" value="{{ data.course.course_id }}">
                             <input type="hidden" name="test_key" value="{{ q.test_key }}">

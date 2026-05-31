@@ -235,6 +235,7 @@ async def post_openedu_v2_attempt(payload: OpenEduV2AttemptIn, user_id: Optional
 @app.post('/v2/openedu/solutions/query')
 @app.post('/api/v2/openedu/solutions/query')
 async def post_openedu_v2_query(payload: OpenEduV2SolutionsQueryIn, user_id: Optional[int] = Depends(require_api_token)) -> dict:
+    await database.update_user_client_meta(user_id, payload.client.model_dump())
     question_keys = payload.questionKeys
     if not question_keys and payload.questions:
         question_keys = [q.questionKey for q in payload.questions]

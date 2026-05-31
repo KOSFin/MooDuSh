@@ -23,6 +23,10 @@
             <tr><th>Telegram ID</th><td>{{ data.user.telegram_id }}</td></tr>
             <tr><th>Имя</th><td>{{ data.user.telegram_first_name or '-' }}</td></tr>
             <tr><th>Статус</th><td>{% if data.user.is_active %}<span class="badge badge-green">активен</span>{% else %}<span class="badge badge-gray">неактивен</span>{% endif %}</td></tr>
+            <tr><th>Версия расширения</th><td>{{ data.user.latest_extension_version or '-' }}</td></tr>
+            <tr><th>Parser</th><td>{{ data.user.latest_parser_version or '-' }}</td></tr>
+            <tr><th>Build</th><td>{{ data.user.latest_build_id[:12] if data.user.latest_build_id else '-' }}</td></tr>
+            <tr><th>Клиент обновлен</th><td>{{ data.user.latest_client_seen_at.strftime('%d.%m.%Y %H:%M') if data.user.latest_client_seen_at else '-' }}</td></tr>
             <tr><th>Последняя активность</th><td>{{ data.user.last_active_at.strftime('%d.%m.%Y %H:%M') if data.user.last_active_at else '-' }}</td></tr>
             <tr><th>Регистрация</th><td>{{ data.user.created_at.strftime('%d.%m.%Y %H:%M') if data.user.created_at else '-' }}</td></tr>
         </tbody>

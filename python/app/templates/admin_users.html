@@ -7,7 +7,7 @@
 </div>
 
 <form method="get" action="/admin/users" class="search-row">
-    <input type="text" name="q" value="{{ search }}" class="search-input" placeholder="ID, Telegram ID, username или имя">
+    <input type="text" name="q" value="{{ search }}" class="search-input" placeholder="ID, Telegram ID, username, имя или версия">
     <button type="submit" class="btn">Найти</button>
     {% if search %}<a class="btn btn-secondary" href="/admin/users">Сбросить</a>{% endif %}
 </form>
@@ -20,6 +20,7 @@
                 <th>Telegram</th>
                 <th>Имя</th>
                 <th>Статус</th>
+                <th>Версия</th>
                 <th>Тестов</th>
                 <th>Вопросов</th>
                 <th>Правильных</th>
@@ -34,6 +35,11 @@
                 <td>{% if u.telegram_username %}<a href="/admin/users/{{ u.id }}">@{{ u.telegram_username }}</a>{% else %}<a href="/admin/users/{{ u.id }}">{{ u.telegram_id }}</a>{% endif %}</td>
                 <td>{{ u.telegram_first_name or '-' }}</td>
                 <td>{% if u.is_active %}<span class="badge badge-green">активен</span>{% else %}<span class="badge badge-gray">неактивен</span>{% endif %}</td>
+                <td>
+                    {{ u.latest_extension_version or '-' }}
+                    {% if u.latest_parser_version %}<div class="text-muted">parser {{ u.latest_parser_version }}</div>{% endif %}
+                    {% if u.latest_client_seen_at %}<div class="text-muted">{{ u.latest_client_seen_at.strftime('%d.%m.%Y %H:%M') }}</div>{% endif %}
+                </td>
                 <td>{{ u.tests_count }}</td>
                 <td>{{ u.questions_count }}</td>
                 <td>{{ u.completions_count }}</td>
@@ -41,7 +47,7 @@
                 <td class="text-muted">{{ u.created_at.strftime('%d.%m.%Y') if u.created_at else '-' }}</td>
             </tr>
         {% else %}
-            <tr><td colspan="9" class="empty">Пользователи не найдены.</td></tr>
+            <tr><td colspan="10" class="empty">Пользователи не найдены.</td></tr>
         {% endfor %}
         </tbody>
     </table>

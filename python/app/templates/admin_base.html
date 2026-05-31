@@ -198,6 +198,12 @@
                 return;
             }
 
+            const confirmMessage = form.getAttribute('data-confirm') || '';
+            if (confirmMessage && !window.confirm(confirmMessage)) {
+                event.preventDefault();
+                return;
+            }
+
             event.preventDefault();
             const removeSelector = form.getAttribute('data-remove-target') || '[data-admin-delete-row]';
             const target = form.closest(removeSelector) || form.closest('[data-admin-delete-row]');

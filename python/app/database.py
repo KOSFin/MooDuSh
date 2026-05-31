@@ -337,6 +337,42 @@ class Database:
     def _v2_admin_course_filter(course_id: str) -> str:
         return '' if course_id == OPENEDU_V2_UNMAPPED_COURSE_ID else str(course_id or '')
 
+    @staticmethod
+    def _client_meta_value(value: Any) -> str:
+        text = str(value or '').strip()
+        return '' if text.lower() in {'unknown', 'undefined', 'null'} else text
+
+    async def _touch_user_client_meta(self, conn, user_id: int | None, client: dict[str, Any]) -> None:
+        if user_id is None:
+            return
+
+        extension_version = self._client_meta_value(client.get('extensionVersion'))
+        build_id = self._client_meta_value(client.get('buildId'))
+        parser_version = self._client_meta_value(client.get('parserVersion'))
+        platform = self._client_meta_value(client.get('platform'))
+        client_id = self._client_meta_value(client.get('clientId'))
+        if not any([extension_version, build_id, parser_version, platform, client_id]):
+            return
+
+        await conn.execute(
+            """
+            UPDATE users
+            SET latest_extension_version = COALESCE(NULLIF($2, ''), latest_extension_version),
+                latest_build_id = COALESCE(NULLIF($3, ''), latest_build_id),
+                latest_parser_version = COALESCE(NULLIF($4, ''), latest_parser_version),
+                latest_client_platform = COALESCE(NULLIF($5, ''), latest_client_platform),
+                latest_client_id = COALESCE(NULLIF($6, ''), latest_client_id),
+                latest_client_seen_at = NOW()
+            WHERE id = $1
+            """,
+            user_id,
+            extension_version,
+            build_id,
+            parser_version,
+            platform,
+            client_id,
+        )
+
     async def connect(self) -> None:
         self.pool = await asyncpg.create_pool(
             host=settings.database_host,
@@ -438,6 +474,12 @@ class Database:
 
             # Schema evolution — add columns / indexes that may not exist yet.
             for stmt in [
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS latest_extension_version TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS latest_build_id TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS latest_parser_version TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS latest_client_platform TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS latest_client_id TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS latest_client_seen_at TIMESTAMPTZ DEFAULT NULL",
                 "ALTER TABLE openedu_attempts ADD COLUMN IF NOT EXISTS fingerprint TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE openedu_attempts ADD COLUMN IF NOT EXISTS user_id BIGINT DEFAULT NULL",
                 "ALTER TABLE openedu_participant_question_state ADD COLUMN IF NOT EXISTS user_id BIGINT DEFAULT NULL",
@@ -656,7 +698,9 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_openedu_v2_questions_fingerprint ON openedu_v2_questions (test_key, question_fingerprint) WHERE question_fingerprint != '';
                 CREATE INDEX IF NOT EXISTS idx_openedu_v2_answers_norm ON openedu_v2_answers (test_key, question_key, answer_norm) WHERE answer_norm != '';
                 CREATE INDEX IF NOT EXISTS idx_openedu_v2_attempts_test ON openedu_v2_attempts (test_key, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_openedu_v2_attempts_user_created ON openedu_v2_attempts (user_id, created_at DESC);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_openedu_v2_attempts_fingerprint ON openedu_v2_attempts (fingerprint) WHERE fingerprint != '';
+                CREATE INDEX IF NOT EXISTS idx_openedu_v2_participant_user_updated ON openedu_v2_participant_question_state (user_id, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_openedu_v2_courses_updated ON openedu_v2_courses (updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_client_logs_user_created ON client_logs (user_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_client_logs_kind_created ON client_logs (kind, created_at DESC);
@@ -1273,6 +1317,11 @@ class Database:
                 user_id,
             )
 
+    async def update_user_client_meta(self, user_id: int | None, client: dict[str, Any]) -> None:
+        assert self.pool is not None
+        async with self.pool.acquire() as conn:
+            await self._touch_user_client_meta(conn, user_id, client)
+
     async def get_user_stats(self, telegram_id: int) -> dict[str, Any]:
         assert self.pool is not None
         async with self.pool.acquire() as conn:
@@ -1798,6 +1847,7 @@ class Database:
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                await self._touch_user_client_meta(conn, user_id, client)
                 first_course = (questions[0].get('course') if questions else {}) or {}
                 await self._upsert_openedu_v2_hierarchy(conn, context, first_course)
                 await conn.execute(
@@ -2148,6 +2198,7 @@ class Database:
         client = payload.get('client') or {}
         system = payload.get('system') or {}
         async with self.pool.acquire() as conn:
+            await self._touch_user_client_meta(conn, user_id, client)
             await conn.execute(
                 """
                 INSERT INTO client_logs
@@ -3320,6 +3371,47 @@ class Database:
     async def get_admin_users_page(self, search: str = '', limit: int = 50, offset: int = 0) -> dict[str, Any]:
         assert self.pool is not None
         needle = '%' + search.strip() + '%' if search.strip() else ''
+        latest_client_join = """
+            LEFT JOIN LATERAL (
+                SELECT extension_version, build_id, parser_version, platform, client_id, seen_at
+                FROM (
+                    SELECT extension_version, build_id, parser_version, platform, client_id, created_at AS seen_at
+                    FROM openedu_v2_attempts
+                    WHERE user_id = u.id AND extension_version != ''
+                    UNION ALL
+                    SELECT extension_version, build_id, parser_version, platform, '' AS client_id, created_at AS seen_at
+                    FROM client_logs
+                    WHERE user_id = u.id AND extension_version != ''
+                    UNION ALL
+                    SELECT extension_version, build_id, parser_version, 'openedu' AS platform, '' AS client_id, updated_at AS seen_at
+                    FROM openedu_v2_participant_question_state
+                    WHERE user_id = u.id AND extension_version != ''
+                ) meta
+                ORDER BY seen_at DESC
+                LIMIT 1
+            ) latest_client ON TRUE
+        """
+        users_select = f"""
+            SELECT u.id, u.telegram_id, u.telegram_username, u.telegram_first_name,
+                   u.is_active, u.created_at, u.last_active_at,
+                   COALESCE(NULLIF(u.latest_extension_version, ''), latest_client.extension_version, '') AS latest_extension_version,
+                   COALESCE(NULLIF(u.latest_build_id, ''), latest_client.build_id, '') AS latest_build_id,
+                   COALESCE(NULLIF(u.latest_parser_version, ''), latest_client.parser_version, '') AS latest_parser_version,
+                   COALESCE(NULLIF(u.latest_client_platform, ''), latest_client.platform, '') AS latest_client_platform,
+                   COALESCE(NULLIF(u.latest_client_id, ''), latest_client.client_id, '') AS latest_client_id,
+                   COALESCE(u.latest_client_seen_at, latest_client.seen_at) AS latest_client_seen_at,
+                   COUNT(DISTINCT ps.test_key) AS tests_count,
+                   COUNT(ps.question_key) AS questions_count,
+                   COUNT(*) FILTER (WHERE ps.is_correct) AS completions_count
+            FROM users u
+            LEFT JOIN openedu_participant_question_state ps ON ps.user_id = u.id
+            {latest_client_join}
+            {{where_clause}}
+            GROUP BY u.id, latest_client.extension_version, latest_client.build_id,
+                     latest_client.parser_version, latest_client.platform, latest_client.client_id, latest_client.seen_at
+            ORDER BY u.last_active_at DESC
+            LIMIT $1 OFFSET $2
+        """
         async with self.pool.acquire() as conn:
             if needle:
                 total = await conn.fetchval(
@@ -3330,6 +3422,7 @@ class Database:
                        OR telegram_first_name ILIKE $1
                        OR telegram_id::text ILIKE $1
                        OR id::text ILIKE $1
+                       OR latest_extension_version ILIKE $1
                     """,
                     needle,
                 )
@@ -3338,39 +3431,17 @@ class Database:
                        OR u.telegram_first_name ILIKE $3
                        OR u.telegram_id::text ILIKE $3
                        OR u.id::text ILIKE $3
+                       OR u.latest_extension_version ILIKE $3
                 """
                 rows = await conn.fetch(
-                    f"""
-                    SELECT u.id, u.telegram_id, u.telegram_username, u.telegram_first_name,
-                           u.is_active, u.created_at, u.last_active_at,
-                           COUNT(DISTINCT ps.test_key) AS tests_count,
-                           COUNT(ps.question_key) AS questions_count,
-                           COUNT(*) FILTER (WHERE ps.is_correct) AS completions_count
-                    FROM users u
-                    LEFT JOIN openedu_participant_question_state ps ON ps.user_id = u.id
-                    {where_clause}
-                    GROUP BY u.id
-                    ORDER BY u.last_active_at DESC
-                    LIMIT $1 OFFSET $2
-                    """,
+                    users_select.format(where_clause=where_clause),
                     limit, offset, needle,
                 )
                 return {'total': total, 'users': [dict(r) for r in rows], 'search': search.strip()}
 
             total = await conn.fetchval("SELECT COUNT(*) FROM users")
             rows = await conn.fetch(
-                """
-                SELECT u.id, u.telegram_id, u.telegram_username, u.telegram_first_name,
-                       u.is_active, u.created_at, u.last_active_at,
-                       COUNT(DISTINCT ps.test_key) AS tests_count,
-                       COUNT(ps.question_key) AS questions_count,
-                       COUNT(*) FILTER (WHERE ps.is_correct) AS completions_count
-                FROM users u
-                LEFT JOIN openedu_participant_question_state ps ON ps.user_id = u.id
-                GROUP BY u.id
-                ORDER BY u.last_active_at DESC
-                LIMIT $1 OFFSET $2
-                """,
+                users_select.format(where_clause=''),
                 limit, offset,
             )
         return {'total': total, 'users': [dict(r) for r in rows], 'search': search.strip()}
@@ -3380,10 +3451,34 @@ class Database:
         async with self.pool.acquire() as conn:
             user = await conn.fetchrow(
                 """
-                SELECT id, telegram_id, telegram_username, telegram_first_name,
-                       is_active, created_at, last_active_at
-                FROM users
-                WHERE id = $1
+                SELECT u.id, u.telegram_id, u.telegram_username, u.telegram_first_name,
+                       u.is_active, u.created_at, u.last_active_at,
+                       COALESCE(NULLIF(u.latest_extension_version, ''), latest_client.extension_version, '') AS latest_extension_version,
+                       COALESCE(NULLIF(u.latest_build_id, ''), latest_client.build_id, '') AS latest_build_id,
+                       COALESCE(NULLIF(u.latest_parser_version, ''), latest_client.parser_version, '') AS latest_parser_version,
+                       COALESCE(NULLIF(u.latest_client_platform, ''), latest_client.platform, '') AS latest_client_platform,
+                       COALESCE(NULLIF(u.latest_client_id, ''), latest_client.client_id, '') AS latest_client_id,
+                       COALESCE(u.latest_client_seen_at, latest_client.seen_at) AS latest_client_seen_at
+                FROM users u
+                LEFT JOIN LATERAL (
+                    SELECT extension_version, build_id, parser_version, platform, client_id, seen_at
+                    FROM (
+                        SELECT extension_version, build_id, parser_version, platform, client_id, created_at AS seen_at
+                        FROM openedu_v2_attempts
+                        WHERE user_id = u.id AND extension_version != ''
+                        UNION ALL
+                        SELECT extension_version, build_id, parser_version, platform, '' AS client_id, created_at AS seen_at
+                        FROM client_logs
+                        WHERE user_id = u.id AND extension_version != ''
+                        UNION ALL
+                        SELECT extension_version, build_id, parser_version, 'openedu' AS platform, '' AS client_id, updated_at AS seen_at
+                        FROM openedu_v2_participant_question_state
+                        WHERE user_id = u.id AND extension_version != ''
+                    ) meta
+                    ORDER BY seen_at DESC
+                    LIMIT 1
+                ) latest_client ON TRUE
+                WHERE u.id = $1
                 """,
                 user_id,
             )
