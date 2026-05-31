@@ -4807,15 +4807,19 @@
         });
 
         const resolved = [];
-        const seenCells = new Set();
+        const seenTargets = new Set();
         (Array.isArray(answers) ? answers : []).forEach((answer) => {
             const rawKey = String(answer?.answerKey || '').trim();
             const rawText = String(answer?.answerText || answer || '').trim();
             const match = byKey.get(rawKey) || byText.get(normalizeMatchingTargetKey(rawText));
-            if (!match || seenCells.has(match.cellId)) {
+            if (!match) {
                 return;
             }
-            seenCells.add(match.cellId);
+            const targetKey = match.cellId + '|' + match.answerId;
+            if (seenTargets.has(targetKey)) {
+                return;
+            }
+            seenTargets.add(targetKey);
             resolved.push(match);
         });
 
@@ -4838,10 +4842,20 @@
         }
 
         const current = parseOpenEduDataLiteral(matchingData.input.value || '') || {};
-        const currentAnswer = current && typeof current.answer === 'object' ? current.answer : {};
-        const nextAnswer = mode === 'set-all' ? {} : { ...currentAnswer };
+        const currentAnswer = current?.answer && typeof current.answer === 'object' ? current.answer : {};
+        const nextAnswer = mode === 'set-all'
+            ? {}
+            : Object.fromEntries(Object.entries(currentAnswer).map(([cellId, answerIds]) => [
+                cellId,
+                Array.isArray(answerIds) ? [...answerIds] : []
+            ]));
         targets.forEach((target) => {
-            nextAnswer[target.cellId] = [target.answerId];
+            if (!Array.isArray(nextAnswer[target.cellId])) {
+                nextAnswer[target.cellId] = [];
+            }
+            if (!nextAnswer[target.cellId].includes(target.answerId)) {
+                nextAnswer[target.cellId].push(target.answerId);
+            }
         });
 
         setNativeInputValue(matchingData.input, JSON.stringify({ answer: nextAnswer }));
