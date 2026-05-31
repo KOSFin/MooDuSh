@@ -1,6 +1,6 @@
 (function () {
     const EVENT_TYPE = 'PARAMEXT_OPENEDU_COURSE_PAYLOAD';
-    const TARGET_RE = /\/api\/(?:courses\/v2\/blocks\/|courseware\/sequence\/)/;
+    const TARGET_RE = /\/api\/(?:courses\/v2\/blocks\/|courseware\/course\/|courseware\/sequence\/)/;
 
     function shouldCapture(url) {
         return TARGET_RE.test(String(url || ''));

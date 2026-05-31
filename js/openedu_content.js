@@ -152,6 +152,7 @@
     let lastCourseDiscoveryAt = 0;
     let openeduCourseVerticals = [];
     let openeduCapturedCourseVerticals = [];
+    let openeduCapturedCourseTitlesById = {};
 
     let iframeQuestionsCache = [];
     let topFrameIframeQuestions = null;
@@ -416,9 +417,9 @@
         }));
     }
 
-    function requestTopContext() {
+    function requestTopContext(force) {
         if (isTopFrame) return Promise.resolve(null);
-        if (window.__PARAMEXT_TOP_CONTEXT) return Promise.resolve(window.__PARAMEXT_TOP_CONTEXT);
+        if (!force && window.__PARAMEXT_TOP_CONTEXT) return Promise.resolve(window.__PARAMEXT_TOP_CONTEXT);
         if (_topContextPromise) return _topContextPromise;
         _topContextPromise = new Promise(resolve => {
             let handled = false;
@@ -427,6 +428,7 @@
                     window.removeEventListener('message', listener);
                     window.__PARAMEXT_TOP_CONTEXT = event.data.context;
                     handled = true;
+                    _topContextPromise = null;
                     resolve(event.data.context);
                 }
             };
@@ -435,6 +437,7 @@
             setTimeout(() => {
                 if (!handled) {
                     window.removeEventListener('message', listener);
+                    _topContextPromise = null;
                     resolve(null);
                 }
             }, 1500);
@@ -450,14 +453,18 @@
             return;
         }
 
+        if (!isTopFrame && event.data.type === 'PARAMEXT_OPENEDU_CONTEXT_UPDATE') {
+            window.__PARAMEXT_TOP_CONTEXT = event.data.context;
+            scheduleCycle(true, 'top-context-update', { allowNetwork: true });
+            return;
+        }
+
         if (isTopFrame) {
             if (event.data.type === 'PARAMEXT_OPENEDU_CONTEXT_REQUEST') {
                 try {
                     event.source.postMessage({
                         type: 'PARAMEXT_OPENEDU_CONTEXT_REPLY',
-                        context: Object.assign({}, getCourseContext(true), {
-                            courseVerticals: openeduCourseVerticals
-                        })
+                        context: getTopContextPayload()
                     }, '*');
                 } catch (e) {}
             } else if (event.data.type === 'PARAMEXT_OPENEDU_QUESTIONS_SYNC') {
@@ -802,17 +809,43 @@
         return Boolean(settings?.diagnostics?.openeduDebugOverlay);
     }
 
+    function getTopContextPayload() {
+        return Object.assign({}, getCourseContext(true), {
+            courseVerticals: openeduCourseVerticals
+        });
+    }
+
+    function broadcastTopContextUpdate(source) {
+        if (!isTopFrame) {
+            return;
+        }
+        broadcastOpeneduMessageToChildFrames({
+            type: 'PARAMEXT_OPENEDU_CONTEXT_UPDATE',
+            source: String(source || 'course-context'),
+            context: getTopContextPayload()
+        });
+    }
+
     function setDiscoveredCourseVerticals(verticals, source) {
         const courseApi = window.ParamExtOpeneduCourseApi || {};
         const incoming = Array.isArray(verticals) ? verticals : [];
         openeduCourseVerticals = typeof courseApi.mergeCourseMaps === 'function'
             ? courseApi.mergeCourseMaps(openeduCourseVerticals, incoming)
             : incoming;
+        openeduCourseVerticals = openeduCourseVerticals.map((item) => {
+            const courseTitle = item?.courseTitle || openeduCapturedCourseTitlesById[item?.courseId] || '';
+            return courseTitle && courseTitle !== item?.courseTitle
+                ? Object.assign({}, item, { courseTitle })
+                : item;
+        });
         lastCourseDiscoveryAt = Date.now();
         debugSync('course_discovery_update', {
             source: String(source || 'unknown'),
             verticalCount: openeduCourseVerticals.length
         });
+        if (isTopFrame) {
+            broadcastTopContextUpdate('course-discovery-' + String(source || 'unknown'));
+        }
     }
 
     function ingestCapturedOpeneduCoursePayload(url, payload) {
@@ -823,14 +856,24 @@
         if (typeof courseApi.buildCourseMapFromCapturedPayload !== 'function') {
             return;
         }
+        if (typeof courseApi.extractCourseMetadataFromCapturedPayload === 'function') {
+            const courseMeta = courseApi.extractCourseMetadataFromCapturedPayload(url, payload);
+            if (courseMeta?.courseId && courseMeta.courseTitle) {
+                openeduCapturedCourseTitlesById[courseMeta.courseId] = courseMeta.courseTitle;
+            }
+        }
         const verticals = courseApi.buildCourseMapFromCapturedPayload(url, payload);
         if (!verticals.length) {
+            if (isTopFrame) {
+                broadcastTopContextUpdate('captured-openedu-course-metadata');
+            }
             return;
         }
         openeduCapturedCourseVerticals = typeof courseApi.mergeCourseMaps === 'function'
             ? courseApi.mergeCourseMaps(openeduCapturedCourseVerticals, verticals)
             : verticals;
         setDiscoveredCourseVerticals(openeduCapturedCourseVerticals, 'captured-openedu-payload');
+        scheduleCycle(true, 'captured-openedu-payload', { allowNetwork: true });
     }
 
     async function refreshCourseDiscovery(force) {
@@ -909,9 +952,10 @@
         const courseMatch = matched.courseId
             ? matched
             : (knownVerticals.find((item) => item.courseId === courseId) || {});
+        const capturedCourseTitle = openeduCapturedCourseTitlesById[matched.courseId || courseId] || '';
         return {
             courseId: matched.courseId || courseId,
-            courseTitle: matched.courseTitle || courseMatch.courseTitle || document.title || '',
+            courseTitle: matched.courseTitle || courseMatch.courseTitle || capturedCourseTitle || document.title || '',
             chapterId: matched.chapterId || '',
             chapterTitle: matched.chapterTitle || '',
             sequentialId: matched.sequentialId || '',
@@ -920,6 +964,59 @@
             verticalTitle: matched.verticalTitle || '',
             problemId: question?.domId || '',
             frameUrl: source
+        };
+    }
+
+    function hasCompleteCourseHierarchy(course) {
+        return Boolean(
+            course
+            && course.courseId
+            && course.chapterId
+            && course.sequentialId
+            && course.verticalId
+        );
+    }
+
+    function mergeCourseRef(previous, incoming) {
+        const result = Object.assign({}, previous || {});
+        Object.keys(incoming || {}).forEach((key) => {
+            if (incoming[key] !== '' && incoming[key] !== null && typeof incoming[key] !== 'undefined') {
+                result[key] = incoming[key];
+            }
+        });
+        return result;
+    }
+
+    function resolveCourseRefForQuestion(question) {
+        const previous = question?.course || {};
+        const incoming = getCourseRefForQuestion(question);
+        const merged = mergeCourseRef(previous, incoming);
+        const capturedCourseTitle = openeduCapturedCourseTitlesById[merged.courseId] || '';
+        if (!merged.courseTitle && capturedCourseTitle) {
+            merged.courseTitle = capturedCourseTitle;
+        }
+        return merged;
+    }
+
+    function getCourseHierarchyReadiness(questions) {
+        const list = Array.isArray(questions) ? questions : [];
+        const incomplete = [];
+        list.forEach((question) => {
+            const course = resolveCourseRefForQuestion(question);
+            question.course = course;
+            if (!hasCompleteCourseHierarchy(course)) {
+                incomplete.push({
+                    questionKey: question.questionKey,
+                    courseId: course.courseId || '',
+                    chapterId: course.chapterId || '',
+                    sequentialId: course.sequentialId || '',
+                    verticalId: course.verticalId || ''
+                });
+            }
+        });
+        return {
+            ready: incomplete.length === 0,
+            incomplete
         };
     }
 
@@ -955,7 +1052,7 @@
             parserSource: question?.fromVirtualContent ? 'virtual_dom' : 'live_dom',
             parseConfidence,
             rawType: '',
-            course: getCourseRefForQuestion(question)
+            course: resolveCourseRefForQuestion(question)
         };
     }
 
@@ -3846,7 +3943,7 @@
                     parserSource: question.parserSource || 'live_dom',
                     parseConfidence: Number(question.parseConfidence || 0),
                     rawType: question.rawType || '',
-                    course: question.course || getCourseRefForQuestion(question),
+                    course: resolveCourseRefForQuestion(question),
                     verified: question.hasVerifiedAnswer,
                     isCorrect: question.correct,
                     answers: question.options.map((option) => ({
@@ -3897,7 +3994,7 @@
                     questionFingerprint: question.questionFingerprint || '',
                     parserSource: question.parserSource || 'live_dom',
                     parseConfidence: Number(question.parseConfidence || 0),
-                    course: question.course || getCourseRefForQuestion(question)
+                    course: resolveCourseRefForQuestion(question)
                 };
             })
         };
@@ -6886,7 +6983,7 @@
                 ),
                 fromIframe: true,
                 fromVirtualContent: Boolean(question.fromVirtualContent),
-                course: question.course || getCourseRefForQuestion(question),
+                course: resolveCourseRefForQuestion(question),
                 options: (Array.isArray(question.options) ? question.options : []).map((option) => ({
                     answerKey: option.answerKey,
                     answerText: sanitizeAnswerText(option.answerText),
@@ -7033,7 +7130,7 @@
                 lastMergedStatsByQuestion = null;
                 lastRenderedQuestions = snapshotQuestionReferences(questions);
 
-                onlineState = { online: false, text: OPENEDU_TOKEN_REQUIRED_TITLE };
+                const onlineState = { online: false, text: OPENEDU_TOKEN_REQUIRED_TITLE };
                 topFrameOnlineState = onlineState;
                 window.__PARAMEXT_TOPFRAME_ONLINE_STATE = topFrameOnlineState;
 
@@ -7044,6 +7141,54 @@
                     syncIframeStateToTop({}, questions, onlineState);
                 }
                 return;
+            }
+
+            if (allowNetwork) {
+                let hierarchyReadiness = getCourseHierarchyReadiness(questions);
+                if (!hierarchyReadiness.ready) {
+                    if (isTopFrame) {
+                        await refreshCourseDiscovery(true);
+                    } else {
+                        await requestTopContext(true);
+                    }
+                    hierarchyReadiness = getCourseHierarchyReadiness(questions);
+                }
+
+                if (!hierarchyReadiness.ready) {
+                    debugSync('cycle_waiting_for_course_hierarchy', {
+                        source,
+                        incompleteCount: hierarchyReadiness.incomplete.length,
+                        incomplete: hierarchyReadiness.incomplete.slice(0, 5)
+                    });
+
+                    const localStatsByQuestion = buildLocalFallbackStats(questions);
+                    const mergedStatsByQuestion = mergeStatsByQuestion(
+                        null,
+                        localStatsByQuestion,
+                        questions,
+                        lastMergedStatsByQuestion,
+                        lastRenderedQuestions,
+                    );
+                    renderInlineWands(mergedStatsByQuestion, questions);
+                    lastMergedStatsByQuestion = mergedStatsByQuestion;
+                    lastRenderedQuestions = snapshotQuestionReferences(questions);
+
+                    const onlineState = { online: false, text: 'Ожидание структуры курса' };
+                    topFrameOnlineState = onlineState;
+                    window.__PARAMEXT_TOPFRAME_ONLINE_STATE = topFrameOnlineState;
+
+                    if (isTopFrame) {
+                        setStickOnline(false, onlineState.text);
+                        renderStick(mergedStatsByQuestion, questions);
+                    } else {
+                        syncIframeStateToTop(mergedStatsByQuestion, questions, onlineState);
+                    }
+
+                    setTimeout(() => {
+                        scheduleCycle(true, 'course-hierarchy-wait', { allowNetwork: true });
+                    }, 1200);
+                    return;
+                }
             }
 
             const localStatsByQuestion = buildLocalFallbackStats(questions);

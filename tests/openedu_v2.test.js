@@ -72,20 +72,33 @@ test('OpenEdu V2 course map extracts graded vertical hierarchy from HAR blocks p
 
 test('OpenEdu V2 course map reads captured course.json blocks and sequence payloads', { skip: !fs.existsSync(path.join(__dirname, '..', 'test-files', 'response', 'course.json')) }, () => {
     const payloads = readCapturedCourseJsonPayloads();
+    const coursePayload = payloads.find((payload) => payload.id && payload.name);
     const blocksPayload = payloads.find((payload) => payload.blocks);
     const sequencePayload = payloads.find((payload) => Array.isArray(payload.items));
 
-    const blocksMap = courseApi.buildCourseMapFromCapturedPayload('', blocksPayload);
+    const courseMap = courseApi.buildCourseMapFromCapturedPayload(
+        'https://courses.openedu.ru/api/courseware/course/course-v1:urfu+PHILOSOPHY+spring_2026',
+        coursePayload,
+    );
+    const blocksMap = courseApi.buildCourseMapFromCapturedPayload(
+        'https://courses.openedu.ru/api/courses/v2/blocks/?course_id=course-v1%3Aurfu%2BPHILOSOPHY%2Bspring_2026&depth=3',
+        blocksPayload,
+    );
     const sequenceMap = courseApi.buildCourseMapFromCapturedPayload(
         'https://courses.openedu.ru/api/courseware/sequence/block-v1:urfu+PHILOSOPHY+spring_2026+type@sequential+block@566d47b22d3348d8ae6a0e8b2627a7bd',
         sequencePayload,
     );
-    const merged = courseApi.mergeCourseMaps(blocksMap, sequenceMap);
+    const merged = courseApi.mergeCourseMaps(courseApi.mergeCourseMaps(courseMap, blocksMap), sequenceMap);
     const target = merged.find((item) => item.verticalId === 'block-v1:urfu+PHILOSOPHY+spring_2026+type@vertical+block@68edf4b377694f5086aa4ed3b2a7ad9f');
 
+    assert.equal(courseMap[0].courseId, 'course-v1:urfu+PHILOSOPHY+spring_2026');
+    assert.equal(courseMap[0].courseTitle, 'Философия');
     assert.ok(blocksMap.length > 100);
+    assert.ok(blocksMap.every((item) => item.courseId === 'course-v1:urfu+PHILOSOPHY+spring_2026'));
     assert.ok(sequenceMap.length > 0);
     assert.ok(target);
+    assert.equal(target.courseId, 'course-v1:urfu+PHILOSOPHY+spring_2026');
+    assert.equal(target.courseTitle, 'Философия');
     assert.equal(target.chapterTitle, 'Раздел 4. Философия Нового времени');
     assert.equal(target.sequentialTitle, 'Тема 11. Философия как теория познания');
     assert.equal(target.verticalTitle, 'Тестовые задания');

@@ -102,11 +102,12 @@
             return {};
         }
 
+        const courseId = findCourseId(course.id) || course.id || '';
         return verticals.map((vertical) => {
             const sequential = parentOf(vertical, 'sequential');
             const chapter = parentOf(vertical, 'chapter');
             return {
-                courseId: course.id || findCourseId(vertical.id),
+                courseId: courseId || findCourseId(vertical.id),
                 courseTitle: course.title || '',
                 chapterId: chapter.id || '',
                 chapterTitle: chapter.title || '',
@@ -117,6 +118,22 @@
                 graded: Boolean(vertical.graded)
             };
         });
+    }
+
+    function extractCourseMetadataFromCapturedPayload(url, payload) {
+        const isCourseEndpoint = /\/api\/courseware\/course\//.test(String(url || ''));
+        const courseTitle = String(payload?.name || payload?.display_name || payload?.title || payload?.course_name || '');
+        if (!isCourseEndpoint && !courseTitle) {
+            return null;
+        }
+        const courseId = String(payload?.id || payload?.course_id || findCourseId(url) || '').trim();
+        if (!courseId || !/^course-v1:/.test(courseId)) {
+            return null;
+        }
+        return {
+            courseId,
+            courseTitle
+        };
     }
 
     function stableSyntheticId(prefix, value) {
@@ -171,9 +188,30 @@
         }
 
         const byVertical = new Map();
+        const courseMetaById = new Map();
+
+        function rememberCourseMeta(item) {
+            const courseId = String(item?.courseId || '').trim();
+            if (!courseId || !item?.courseTitle) {
+                return;
+            }
+            courseMetaById.set(courseId, String(item.courseTitle || ''));
+        }
+
+        function applyCourseMeta(item) {
+            const result = Object.assign({}, item);
+            if (!result.courseTitle && courseMetaById.has(result.courseId)) {
+                result.courseTitle = courseMetaById.get(result.courseId);
+            }
+            return result;
+        }
+
+        (Array.isArray(primary) ? primary : []).forEach(rememberCourseMeta);
+        (Array.isArray(secondary) ? secondary : []).forEach(rememberCourseMeta);
+
         (Array.isArray(primary) ? primary : []).forEach((item) => {
             if (item?.verticalId) {
-                byVertical.set(item.verticalId, Object.assign({}, item));
+                byVertical.set(item.verticalId, applyCourseMeta(item));
             }
         });
         (Array.isArray(secondary) ? secondary : []).forEach((item) => {
@@ -181,7 +219,7 @@
                 return;
             }
             const previous = byVertical.get(item.verticalId) || {};
-            byVertical.set(item.verticalId, mergeItem(previous, item));
+            byVertical.set(item.verticalId, applyCourseMeta(mergeItem(previous, item)));
         });
         return Array.from(byVertical.values());
     }
@@ -192,6 +230,10 @@
         }
         if (Array.isArray(payload?.items)) {
             return buildSequenceMap(payload, findCourseId(url));
+        }
+        const courseMeta = extractCourseMetadataFromCapturedPayload(url, payload);
+        if (courseMeta) {
+            return [courseMeta];
         }
         return [];
     }
@@ -258,6 +300,7 @@
         buildSequenceMap,
         mergeCourseMaps,
         buildCourseMapFromCapturedPayload,
+        extractCourseMetadataFromCapturedPayload,
         fetchVerticalHtml,
         discoverCurrentCourse,
         discoverCurrentCourseFrames
