@@ -19,7 +19,7 @@
     <div class="panel-head"><h2>Вопросы</h2></div>
     <div class="question-list">
         {% for q in data.questions %}
-            <article class="question-row">
+            <article class="question-row" data-admin-delete-row>
                 <div class="question-main">
                     <div class="question-prompt">{{ q.prompt or q.question_key }}</div>
                     <div class="question-meta">
@@ -33,7 +33,7 @@
                     <div class="metric"><span>Подтв.</span><strong>{{ q.verified_count }}</strong></div>
                     <div class="metric"><span>Неверн.</span><strong>{{ q.incorrect_count }}</strong></div>
                     <div class="metric"><span>Выборов</span><strong>{{ q.fallback_count }}</strong></div>
-                    <form method="post" action="/admin/questions/delete" class="metric-action" onsubmit="return confirm('Удалить этот вопрос вместе с ответами и состоянием участников?');">
+                    <form method="post" action="/admin/questions/delete" class="metric-action" data-ajax-delete data-remove-target="[data-admin-delete-row]">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <input type="hidden" name="test_key" value="{{ q.test_key }}">
                         <input type="hidden" name="question_key" value="{{ q.question_key }}">

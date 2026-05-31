@@ -1080,7 +1080,7 @@
             questionFingerprint,
             parserSource: question?.fromVirtualContent ? 'virtual_dom' : 'live_dom',
             parseConfidence,
-            rawType: '',
+            rawType: question?.rawType || '',
             course: resolveCourseRefForQuestion(question)
         };
     }
@@ -1740,6 +1740,7 @@
             || host.id
             || '';
         parsedDoc.__PARAMEXT_VIRTUAL_CONTENT = true;
+        parsedDoc.__PARAMEXT_RAW_CONTENT = rawContent;
         parsedDoc.__PARAMEXT_SOURCE_PATH = verticalUsageId || hostUsageId || host.ownerDocument?.location?.pathname || location.pathname;
         parsedDoc.__PARAMEXT_HOST_PROBLEM_ID = hostUsageId;
         parsedDoc.__PARAMEXT_VIRTUAL_HOST = host;
@@ -2031,6 +2032,138 @@
         } catch (_) {
             return null;
         }
+    }
+
+    function findBalancedObjectLiteral(source, startIndex) {
+        const text = String(source || '');
+        const start = text.indexOf('{', Math.max(0, Number(startIndex || 0)));
+        if (start < 0) {
+            return '';
+        }
+
+        let depth = 0;
+        let quote = '';
+        let escaped = false;
+        for (let index = start; index < text.length; index += 1) {
+            const ch = text[index];
+            if (quote) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch === '\\') {
+                    escaped = true;
+                } else if (ch === quote) {
+                    quote = '';
+                }
+                continue;
+            }
+
+            if (ch === '"' || ch === "'") {
+                quote = ch;
+                continue;
+            }
+            if (ch === '{') {
+                depth += 1;
+            } else if (ch === '}') {
+                depth -= 1;
+                if (depth === 0) {
+                    return text.slice(start, index + 1);
+                }
+            }
+        }
+        return '';
+    }
+
+    function getPhilosophyTestConfig(root) {
+        if (!(root instanceof Element) && !root?.querySelectorAll) {
+            return null;
+        }
+
+        const scripts = Array.from(root.querySelectorAll('script'))
+            .map((script) => String(script.textContent || ''))
+            .filter((text) => /new\s+PhilosophyTest\s*\(/.test(text) && /\bquestions\s*:/.test(text));
+        const scriptText = scripts[0] || '';
+        if (!scriptText) {
+            return null;
+        }
+
+        const questionsIndex = scriptText.search(/\bquestions\s*:/);
+        const questionsLiteral = findBalancedObjectLiteral(scriptText, questionsIndex);
+        const questions = parseOpenEduDataLiteral(questionsLiteral);
+        if (!questions || typeof questions !== 'object') {
+            return null;
+        }
+
+        const typeMatch = scriptText.match(/\btype\s*:\s*["']([^"']+)["']/);
+        const inputSelectorMatch = scriptText.match(/\binput\s*:\s*document\.querySelector\(\s*["']([^"']+)["']\s*\)/);
+        return {
+            questions,
+            inputType: normalizeText(typeMatch?.[1] || 'checkbox') === 'radio' ? 'radio' : 'checkbox',
+            inputSelector: inputSelectorMatch?.[1] || ''
+        };
+    }
+
+    function getPhilosophyTestSelectedAnswers(root, config) {
+        const selected = {};
+        const scope = root instanceof Element ? root : root?.body;
+        const doc = root?.ownerDocument || root;
+        let inputHost = null;
+        if (config?.inputSelector && doc?.querySelector) {
+            try {
+                inputHost = doc.querySelector(config.inputSelector);
+            } catch (_) {
+                inputHost = null;
+            }
+        }
+        if (!(inputHost instanceof Element) && scope?.querySelector) {
+            inputHost = scope.querySelector('[id^="philosophy_test_input_"]');
+        }
+
+        const input = inputHost?.querySelector?.('input[type="text"], input[type="hidden"], textarea')
+            || scope?.querySelector?.('[id^="philosophy_test_input_"] input[type="text"], [id^="philosophy_test_input_"] input[type="hidden"], [id^="philosophy_test_input_"] textarea');
+        const rawValue = (input?.value && input.value !== '{' ? input.value : '')
+            || input?.textContent
+            || extractPhilosophyTestInputValueFromRawContent(doc, config);
+        const parsed = parseOpenEduDataLiteral(rawValue);
+        const answers = parsed?.answer?.answers;
+        if (!answers || typeof answers !== 'object') {
+            return selected;
+        }
+
+        Object.keys(answers).forEach((questionId) => {
+            const letters = Array.isArray(answers[questionId]) ? answers[questionId] : [answers[questionId]];
+            selected[questionId] = new Set(letters.map((item) => String(item || '').trim()).filter(Boolean));
+        });
+        return selected;
+    }
+
+    function extractPhilosophyTestInputValueFromRawContent(doc, config) {
+        const raw = String(doc?.__PARAMEXT_RAW_CONTENT || '');
+        if (!raw) {
+            return '';
+        }
+
+        const hostId = String(config?.inputSelector || '').match(/^#([\w-]+)$/)?.[1] || '';
+        const escapedHostId = hostId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hostMatch = escapedHostId
+            ? raw.match(new RegExp('id=(?:"|&#34;|&quot;)' + escapedHostId + '(?:"|&#34;|&quot;)', 'i'))
+            : null;
+        const search = hostMatch ? raw.slice(hostMatch.index || 0) : raw;
+        const valueMatch = search.match(/(?:<|&lt;)input\b[\s\S]*?\bvalue=(?:"([^"]*)"|&#34;([\s\S]*?)&#34;|&quot;([\s\S]*?)&quot;)/i);
+        return decodeHtmlEntities(valueMatch?.[1] || valueMatch?.[2] || valueMatch?.[3] || '');
+    }
+
+    function naturalQuestionIdCompare(a, b) {
+        const left = String(a || '');
+        const right = String(b || '');
+        const leftMatch = left.match(/(\d+)$/);
+        const rightMatch = right.match(/(\d+)$/);
+        if (leftMatch && rightMatch) {
+            const numeric = Number(leftMatch[1]) - Number(rightMatch[1]);
+            if (numeric !== 0) {
+                return numeric;
+            }
+        }
+        return left.localeCompare(right);
     }
 
     function getMatchingTableApp(root) {
@@ -2400,6 +2533,10 @@
                     return;
                 }
 
+                if (isPhilosophyTestInputBlock(root)) {
+                    return;
+                }
+
                 if (!root.querySelector(OPTION_LABEL_SELECTOR + ', ' + QUESTION_INPUT_SELECTOR)) {
                     return;
                 }
@@ -2410,6 +2547,20 @@
         });
 
         return result;
+    }
+
+    function isPhilosophyTestInputBlock(root) {
+        if (!(root instanceof HTMLElement)) {
+            return false;
+        }
+
+        return Boolean(root.closest('[id^="philosophy_test_input_"]'))
+            || Boolean(root.querySelector('[id^="philosophy_test_input_"]'))
+            || (
+                Boolean(root.closest('[id^="philosophy_test_container_"]'))
+                && Boolean(root.closest('[data-problem-id], .problem, .problems-wrapper, .xblock-student_view-problem')
+                    ?.querySelector('script'))
+            );
     }
 
     const PROMPT_NOISE_RE = /^(?:набран\w*\s+баллов|использован\w*\s+попыток|вы\s+использовали\s+\d+\s*из\s*\d+\s*попыток|разместите\s+ответ\s+здесь|перетащите\s+(?:ответ(?:ы)?|элемент(?:ы)?))\b/i;
@@ -3830,10 +3981,103 @@
             || location.pathname;
     }
 
+    function buildPhilosophyTestRawQuestions() {
+        const rawQuestions = [];
+        const seenRoots = new WeakSet();
+        const docs = getSearchDocuments();
+
+        docs.forEach((doc) => {
+            const roots = Array.from(doc.querySelectorAll('[data-problem-id], .problems-wrapper, .xblock-student_view-problem, body'))
+                .filter((root) => root instanceof HTMLElement && !seenRoots.has(root));
+
+            roots.forEach((root) => {
+                const config = getPhilosophyTestConfig(root);
+                if (!config) {
+                    return;
+                }
+
+                seenRoots.add(root);
+                const ownerDoc = root.ownerDocument || doc;
+                const selectedByQuestion = getPhilosophyTestSelectedAnswers(root, config);
+                const sourcePath = getQuestionSourcePath(ownerDoc);
+                const virtualProblemId = ownerDoc.__PARAMEXT_HOST_PROBLEM_ID || '';
+                const baseDomId = root.getAttribute('data-problem-id') || root.getAttribute('id') || virtualProblemId || 'philosophy-test';
+                const questionIds = Object.keys(config.questions).sort(naturalQuestionIdCompare);
+
+                questionIds.forEach((questionId, questionIndex) => {
+                    const sourceQuestion = config.questions[questionId];
+                    const prompt = sanitizeQuestionPromptText(sourceQuestion?.text || questionId, []);
+                    const answers = Array.isArray(sourceQuestion?.answers) ? sourceQuestion.answers : [];
+                    const selectedLetters = selectedByQuestion[questionId] || new Set();
+                    const groupKey = 'philosophy:' + questionId;
+                    const options = answers.map((answer, answerIndex) => {
+                        const letter = String(answer?.let || answer?.letter || answer?.value || '').trim();
+                        const answerText = sanitizeAnswerText(answer?.text || letter || ('answer_' + String(answerIndex + 1)));
+                        return {
+                            answerKey: groupKey + ':' + (letter || String(answerIndex + 1)),
+                            answerText,
+                            selected: selectedLetters.has(letter),
+                            correct: false,
+                            incorrect: false,
+                            answerAliases: [letter, answerText].filter(Boolean),
+                            inputId: '',
+                            inputName: questionId,
+                            groupKey,
+                            groupPath: '',
+                            inputPath: '',
+                            inputType: config.inputType
+                        };
+                    }).filter((option) => option.answerText);
+
+                    if (!prompt || options.length === 0) {
+                        return;
+                    }
+
+                    const stableAnswerTexts = options.map((option) => sanitizeAnswerText(option.answerText)).filter(Boolean);
+                    const questionKeyBase = buildStableQuestionKeyBase({
+                        sourcePath,
+                        prompt,
+                        answerTexts: stableAnswerTexts,
+                        choiceCount: options.length,
+                        textInputCount: 0,
+                        allowsMultipleAnswers: config.inputType !== 'radio'
+                    });
+                    const locationBucket = questionIndex;
+
+                    rawQuestions.push({
+                        questionKey: '',
+                        questionKeyBase,
+                        domId: baseDomId + '::' + groupKey,
+                        domSelector: '',
+                        ownerDocument: ownerDoc,
+                        root,
+                        liveRoot: ownerDoc.__PARAMEXT_VIRTUAL_HOST || null,
+                        contextRoot: getAdjacentOpeneduContextNode(root),
+                        visualRoot: ownerDoc.__PARAMEXT_VIRTUAL_HOST || root,
+                        prompt,
+                        correct: false,
+                        options,
+                        allowsMultipleAnswers: config.inputType !== 'radio',
+                        hasVerifiedAnswer: false,
+                        fromVirtualContent: Boolean(ownerDoc.__PARAMEXT_VIRTUAL_CONTENT),
+                        signature: buildQuestionSignature(sourcePath, prompt, options, locationBucket, groupKey),
+                        nodeSize: root.querySelectorAll('*').length,
+                        nodeDepth: getNodeDepth(root),
+                        sourcePath,
+                        orderIndex: questionIndex,
+                        rawType: 'philosophy_test'
+                    });
+                });
+            });
+        });
+
+        return rawQuestions;
+    }
+
     function parseQuestions() {
         const blocks = getQuestionBlocks();
 
-        const rawQuestions = [];
+        const rawQuestions = buildPhilosophyTestRawQuestions();
 
         blocks.forEach((root, idx) => {
             const options = getAnswerOptions(root);
@@ -4051,6 +4295,49 @@
             error: result.error || ''
         });
         return result;
+    }
+
+    function hasSelectedPhilosophyTestAnswers(questions) {
+        return (Array.isArray(questions) ? questions : []).some((question) => {
+            if (question?.rawType !== 'philosophy_test') {
+                return false;
+            }
+            return Array.isArray(question.options) && question.options.some((option) => option.selected);
+        });
+    }
+
+    function flushPreNavigationAttempt(source) {
+        if (!hasOpeneduApiToken()) {
+            return;
+        }
+
+        const questions = parseQuestions();
+        if (!hasSelectedPhilosophyTestAnswers(questions)) {
+            return;
+        }
+
+        debugSync('pre_navigation_attempt_flush', {
+            source: String(source || 'submit'),
+            questionCount: questions.length
+        });
+        pushAttemptSnapshot(questions)
+            .then((result) => {
+                if (result?.ok) {
+                    lastAttemptPushAt = Date.now();
+                    lastNetworkSyncAt = lastAttemptPushAt;
+                    clearSyncBlock();
+                }
+                debugSync('pre_navigation_attempt_flush_result', {
+                    ok: Boolean(result?.ok),
+                    status: result?.status || 0,
+                    error: result?.error || ''
+                });
+            })
+            .catch((error) => {
+                debugSync('pre_navigation_attempt_flush_failed', {
+                    error: error && error.message ? String(error.message) : String(error || '')
+                });
+            });
     }
 
     async function pullStatistics(questions) {
@@ -4521,6 +4808,72 @@
         return resolved;
     }
 
+    function countRequestedAnswers(targetAnswers) {
+        return (Array.isArray(targetAnswers) ? targetAnswers : [])
+            .filter((target) => {
+                if (target && typeof target === 'object') {
+                    return String(target.answerKey || target.answerText || target.text || target.value || '').trim();
+                }
+                return String(target || '').trim();
+            })
+            .length;
+    }
+
+    function optionMatchesImportedAnswer(option, target) {
+        const expectedKey = String(target?.answerKey || '').trim();
+        if (expectedKey && option?.answerKey === expectedKey) {
+            return true;
+        }
+
+        const expectedText = normalizeText(target?.answerText || target?.text || target?.value || target || '');
+        if (!expectedText) {
+            return false;
+        }
+
+        if (normalizeText(option?.answerText || '') === expectedText) {
+            return true;
+        }
+
+        return (Array.isArray(option?.answerAliases) ? option.answerAliases : [])
+            .some((alias) => normalizeText(alias) === expectedText);
+    }
+
+    function resolveOrderedSelectTargets(block, options, targetAnswers) {
+        const targets = Array.isArray(targetAnswers) ? targetAnswers : [];
+        if (!(block instanceof HTMLElement) || targets.length === 0) {
+            return [];
+        }
+
+        const selects = Array.from(block.querySelectorAll('select'))
+            .filter((select) => select instanceof HTMLSelectElement);
+        if (selects.length <= 1) {
+            return [];
+        }
+
+        const resolved = [];
+        const usedKeys = new Set();
+        targets.forEach((target, index) => {
+            const select = selects[index] || null;
+            if (!(select instanceof HTMLSelectElement)) {
+                return;
+            }
+
+            const match = options.find((option) => {
+                if (usedKeys.has(option.answerKey)) {
+                    return false;
+                }
+                return findSelectForOption(block, option) === select && optionMatchesImportedAnswer(option, target);
+            });
+            if (!match) {
+                return;
+            }
+            usedKeys.add(match.answerKey);
+            resolved.push(match);
+        });
+
+        return resolved;
+    }
+
     function setNativeInputValue(input, value) {
         const proto = input instanceof HTMLTextAreaElement
             ? HTMLTextAreaElement.prototype
@@ -4539,6 +4892,22 @@
             ? openeduShared.normalizeMatchingText(decoded)
             : normalizeText(decoded);
         return normalizeText(String(normalized || '').replace(/\s*[:/|]\s*/g, ': '));
+    }
+
+    function matchingTargetMatchesImportedText(target, rawText) {
+        const expected = normalizeMatchingTargetKey(rawText);
+        if (!expected) {
+            return true;
+        }
+
+        const variants = [
+            target?.answerText,
+            target?.answerTitle,
+            target?.cellLabel,
+            [target?.cellLabel, target?.answerTitle].filter(Boolean).join(': ')
+        ].map((value) => normalizeMatchingTargetKey(value)).filter(Boolean);
+
+        return variants.some((value) => value === expected);
     }
 
     function getMatchingCellInfo(initialData, cellId) {
@@ -4584,6 +4953,14 @@
         return null;
     }
 
+    function getMatchingTableModelSize(initialData) {
+        const table = Array.isArray(initialData?.table) ? initialData.table : [];
+        return {
+            rowCount: table.length,
+            colCount: table.reduce((max, row) => Array.isArray(row) ? Math.max(max, row.length) : max, 0)
+        };
+    }
+
     function isElementVisibleEnough(element) {
         if (!(element instanceof Element)) {
             return false;
@@ -4624,6 +5001,78 @@
         }
 
         return null;
+    }
+
+    function findMatchingRenderedTable(matchingData) {
+        const app = matchingData?.app;
+        if (!(app instanceof HTMLElement)) {
+            return null;
+        }
+
+        const size = getMatchingTableModelSize(matchingData.initialData);
+        if (size.rowCount === 0 || size.colCount === 0) {
+            return null;
+        }
+
+        const tables = Array.from(app.querySelectorAll('table'))
+            .filter((table) => table instanceof HTMLTableElement && isElementVisibleEnough(table));
+        const scored = tables
+            .map((table) => {
+                const rows = Array.from(table.rows || []);
+                const maxCols = rows.reduce((max, row) => Math.max(max, Array.from(row.cells || [])
+                    .reduce((sum, cell) => sum + Math.max(1, Number(cell.colSpan || 1)), 0)), 0);
+                const rowScore = rows.length >= size.rowCount ? 2 : 0;
+                const colScore = maxCols >= size.colCount ? 2 : 0;
+                const exactScore = rows.length === size.rowCount && maxCols === size.colCount ? 2 : 0;
+                return { table, score: rowScore + colScore + exactScore };
+            })
+            .filter((item) => item.score >= 4)
+            .sort((a, b) => b.score - a.score);
+
+        return scored[0]?.table || null;
+    }
+
+    function buildRenderedTableGrid(table) {
+        if (!(table instanceof HTMLTableElement)) {
+            return [];
+        }
+
+        const grid = [];
+        Array.from(table.rows || []).forEach((row, rowIndex) => {
+            if (!grid[rowIndex]) {
+                grid[rowIndex] = [];
+            }
+            let colIndex = 0;
+            Array.from(row.cells || []).forEach((cell) => {
+                while (grid[rowIndex][colIndex]) {
+                    colIndex += 1;
+                }
+                const rowSpan = Math.max(1, Number(cell.rowSpan || 1));
+                const colSpan = Math.max(1, Number(cell.colSpan || 1));
+                for (let ridx = 0; ridx < rowSpan; ridx += 1) {
+                    const targetRow = rowIndex + ridx;
+                    if (!grid[targetRow]) {
+                        grid[targetRow] = [];
+                    }
+                    for (let cidx = 0; cidx < colSpan; cidx += 1) {
+                        grid[targetRow][colIndex + cidx] = cell;
+                    }
+                }
+                colIndex += colSpan;
+            });
+        });
+        return grid;
+    }
+
+    function findMatchingRenderedCellByModelPosition(matchingData, cellInfo) {
+        if (!cellInfo) {
+            return null;
+        }
+
+        const renderedTable = findMatchingRenderedTable(matchingData);
+        const grid = buildRenderedTableGrid(renderedTable);
+        const cell = grid[cellInfo.rowIndex]?.[cellInfo.colIndex] || null;
+        return cell instanceof HTMLElement && isElementVisibleEnough(cell) ? cell : null;
     }
 
     function getSmallestExactTextElement(root, text) {
@@ -4709,6 +5158,12 @@
             return null;
         }
 
+        const cellInfo = getMatchingCellInfo(matchingData.initialData, target?.cellId);
+        const renderedCell = findMatchingRenderedCellByModelPosition(matchingData, cellInfo);
+        if (renderedCell instanceof HTMLElement) {
+            return renderedCell;
+        }
+
         const direct = findMatchingElementById(app, target?.cellId, [
             'data-id',
             'data-cell-id',
@@ -4719,7 +5174,6 @@
             return direct;
         }
 
-        const cellInfo = getMatchingCellInfo(matchingData.initialData, target?.cellId);
         const rowText = cellInfo?.rowFixedText || String(target?.cellLabel || '').split('/')[0] || '';
         const labelElement = getSmallestExactTextElement(app, rowText);
         const rowContainer = findMatchingTableRowContainer(labelElement, rowText);
@@ -4790,6 +5244,8 @@
         const candidates = openeduShared.buildMatchingTablePairs(matchingData.initialData, {}, true);
         const byKey = new Map();
         const byText = new Map();
+        const byAnswerTitle = new Map();
+        const duplicateAnswerTitles = new Set();
 
         candidates.forEach((candidate) => {
             const cellId = String(candidate.cellId || '').trim();
@@ -4804,14 +5260,27 @@
             item.cellLabel = String(candidate.cellLabel || '').trim();
             byKey.set('match:' + cellId + ':' + answerId, item);
             byText.set(normalizeMatchingTargetKey(answerText), item);
+            const answerTitleKey = normalizeMatchingTargetKey(item.answerTitle);
+            if (answerTitleKey) {
+                if (byAnswerTitle.has(answerTitleKey)) {
+                    duplicateAnswerTitles.add(answerTitleKey);
+                } else {
+                    byAnswerTitle.set(answerTitleKey, item);
+                }
+            }
         });
+        duplicateAnswerTitles.forEach((key) => byAnswerTitle.delete(key));
 
         const resolved = [];
         const seenTargets = new Set();
         (Array.isArray(answers) ? answers : []).forEach((answer) => {
             const rawKey = String(answer?.answerKey || '').trim();
             const rawText = String(answer?.answerText || answer || '').trim();
-            const match = byKey.get(rawKey) || byText.get(normalizeMatchingTargetKey(rawText));
+            const textKey = normalizeMatchingTargetKey(rawText);
+            const keyedMatch = byKey.get(rawKey);
+            const match = keyedMatch && matchingTargetMatchesImportedText(keyedMatch, rawText)
+                ? keyedMatch
+                : (byText.get(textKey) || byAnswerTitle.get(textKey));
             if (!match) {
                 return;
             }
@@ -4826,6 +5295,16 @@
         return resolved;
     }
 
+    function countImportedAnswerTargets(answers) {
+        return (Array.isArray(answers) ? answers : [])
+            .filter((answer) => {
+                if (answer && typeof answer === 'object') {
+                    return String(answer.answerKey || answer.answerText || answer.text || answer.value || '').trim();
+                }
+                return String(answer || '').trim();
+            }).length;
+    }
+
     function applyMatchingTableAnswers(block, question, answers, mode) {
         const matchingData = getMatchingTableData(block);
         if (!matchingData) {
@@ -4837,6 +5316,16 @@
             debugSync('apply_answers_failed', {
                 reason: 'matching_targets_not_resolved',
                 questionKey: question?.questionKey || ''
+            });
+            return false;
+        }
+        const requestedTargetCount = countImportedAnswerTargets(answers);
+        if (mode === 'set-all' && requestedTargetCount > targets.length) {
+            debugSync('apply_answers_failed', {
+                reason: 'matching_targets_partially_resolved',
+                questionKey: question?.questionKey || '',
+                requestedTargetCount,
+                resolvedTargetCount: targets.length
             });
             return false;
         }
@@ -4984,7 +5473,14 @@
 
     function applySelectAnswers(block, question, answers, mode) {
         const options = getAnswerOptions(block);
-        const targets = resolveTargetOptions(options, answers);
+        const directTargets = resolveTargetOptions(options, answers);
+        const orderedTargets = resolveOrderedSelectTargets(block, options, answers);
+        const requestedCount = countRequestedAnswers(answers);
+        const targets = requestedCount > 1
+            && orderedTargets.length >= directTargets.length
+            && orderedTargets.length >= Math.min(requestedCount, block.querySelectorAll('select').length)
+            ? orderedTargets
+            : directTargets;
         if (targets.length === 0) {
             debugSync('apply_answers_failed', {
                 reason: 'select_targets_not_resolved',
@@ -5818,7 +6314,7 @@
         }
 
         const current = parseOpenEduDataLiteral(matchingData.input.value || '') || {};
-        const currentAnswer = current && typeof current.answer === 'object' ? current.answer : {};
+        const currentAnswer = current?.answer && typeof current.answer === 'object' ? current.answer : {};
         return targets.every((target) => {
             const selected = Array.isArray(currentAnswer[target.cellId]) ? currentAnswer[target.cellId] : [];
             return selected.includes(target.answerId);
@@ -6792,8 +7288,9 @@
             'Ниже список вопросов OpenEdu. Нужно определить правильные ответы.',
             'Используй options как список доступных вариантов. knownAnswers.verified уже подтверждены платформой, knownAnswers.popular могут быть подсказкой, knownAnswers.incorrect выбирать нельзя.',
             'Верни только валидный JSON без markdown. Формат строго такой:',
-            '{"answers":[{"index":1,"answers":["точный текст ответа"]},{"questionKey":"...","answers":[{"answerKey":"...","answerText":"..."}]}]}',
+            '{"answers":[{"index":1,"questionKey":"...","answers":[{"answerKey":"...","answerText":"точный текст ответа"}]}]}',
             'Для matching/select/multiple_choice можно указывать несколько answers. Для text_input укажи строку ответа.',
+            'Для matching обязательно сохраняй answerText рядом с answerKey: одинаковые технические id могут повторяться в разных вопросах.',
             '',
             JSON.stringify({ questions: payload }, null, 2)
         ].join('\n');
@@ -6846,7 +7343,7 @@
     function showAiPromptHelp() {
         window.alert([
             '1. Нажми «Копировать» и отправь промпт в ИИ.',
-            '2. ИИ должен вернуть только JSON в формате {"answers":[{"index":1,"answers":["..."]}]} .',
+            '2. ИИ должен вернуть только JSON в формате {"answers":[{"index":1,"questionKey":"...","answers":[{"answerKey":"...","answerText":"..."}]}]} .',
             '3. Нажми «Вставить JSON», вставь ответ ИИ и примени. MooDuSh сопоставит ответы с вопросами и заполнит поля.'
         ].join('\n'));
     }
@@ -6893,17 +7390,17 @@
 
     function findImportedQuestionItem(items, entry) {
         const list = Array.isArray(items) ? items : [];
-        const index = Number(entry?.index || entry?.questionIndex || entry?.number || 0);
-        if (Number.isInteger(index) && index > 0 && index <= list.length) {
-            return list[index - 1];
-        }
-
         const key = collapseWhitespace(entry?.questionKey || entry?.key || '');
         if (key) {
             const byKey = list.find((item) => collapseWhitespace(item.question?.questionKey || '') === key);
             if (byKey) {
                 return byKey;
             }
+        }
+
+        const index = Number(entry?.index || entry?.questionIndex || entry?.number || 0);
+        if (Number.isInteger(index) && index > 0 && index <= list.length) {
+            return list[index - 1];
         }
 
         const prompt = normalizeText(entry?.prompt || entry?.question || '');
@@ -7845,7 +8342,7 @@
     }
 
     function isAutoAdvanceEnabled() {
-        return Boolean(settings?.openedu?.autoAdvanceEnabled);
+        return isOpeneduAutoSolveMode() && Boolean(settings?.openedu?.autoAdvanceEnabled);
     }
 
     function isActiveTabPostSubmitRefreshEnabled() {
@@ -8156,6 +8653,10 @@
                 || (actionable.matches('.problem button') && /(провер|submit|check|save|отправ|answer)/.test(actionText));
             if (isSubmit) {
                 lastSubmitActionAt = Date.now();
+                flushPreNavigationAttempt('manual-submit');
+                setTimeout(() => {
+                    flushPreNavigationAttempt('manual-submit-late');
+                }, 0);
                 requestActiveTabPostSubmitRefresh('manual-submit');
                 let rerenderAttempts = 0;
                 const tryRerender = () => {

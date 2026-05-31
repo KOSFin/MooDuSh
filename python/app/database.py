@@ -3083,6 +3083,142 @@ class Database:
                 ))
         return deleted
 
+    async def _delete_admin_v2_scope(self, course_id: str, chapter_id: str = '', sequential_id: str = '') -> dict[str, int]:
+        assert self.pool is not None
+        course_filter = self._v2_admin_course_filter(course_id)
+        chapter_id = str(chapter_id or '').strip()
+        sequential_id = str(sequential_id or '').strip()
+        if not course_filter or (not chapter_id and not sequential_id):
+            return {}
+
+        deleted: dict[str, int] = {}
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                vertical_rows = await conn.fetch(
+                    """
+                    SELECT vertical_id FROM openedu_v2_verticals
+                    WHERE course_id = $1 AND ($2 = '' OR chapter_id = $2) AND ($3 = '' OR sequential_id = $3)
+                    UNION
+                    SELECT vertical_id FROM openedu_v2_tests
+                    WHERE course_id = $1 AND ($2 = '' OR chapter_id = $2) AND ($3 = '' OR sequential_id = $3)
+                    UNION
+                    SELECT vertical_id FROM openedu_v2_questions
+                    WHERE course_id = $1 AND ($2 = '' OR chapter_id = $2) AND ($3 = '' OR sequential_id = $3)
+                    UNION
+                    SELECT vertical_id FROM openedu_v2_frames
+                    WHERE course_id = $1 AND ($2 = '' OR chapter_id = $2) AND ($3 = '' OR sequential_id = $3)
+                    """,
+                    course_filter, chapter_id, sequential_id,
+                )
+                vertical_ids = [str(row['vertical_id']) for row in vertical_rows if row['vertical_id']]
+
+                test_rows = await conn.fetch(
+                    """
+                    SELECT test_key FROM openedu_v2_tests
+                    WHERE course_id = $1 AND ($2 = '' OR chapter_id = $2) AND ($3 = '' OR sequential_id = $3)
+                    UNION
+                    SELECT test_key FROM openedu_v2_questions
+                    WHERE course_id = $1 AND ($2 = '' OR chapter_id = $2) AND ($3 = '' OR sequential_id = $3)
+                    UNION
+                    SELECT test_key FROM openedu_v2_frames
+                    WHERE course_id = $1 AND ($2 = '' OR chapter_id = $2) AND ($3 = '' OR sequential_id = $3)
+                    UNION
+                    SELECT test_key FROM openedu_v2_parse_reports
+                    WHERE course_id = $1 AND vertical_id = ANY($4::text[])
+                    """,
+                    course_filter, chapter_id, sequential_id, vertical_ids,
+                )
+                test_keys = [str(row['test_key']) for row in test_rows if row['test_key']]
+
+                deleted['parse_reports'] = self._command_count(await conn.execute(
+                    """
+                    DELETE FROM openedu_v2_parse_reports
+                    WHERE course_id = $1
+                      AND (
+                          vertical_id = ANY($2::text[])
+                          OR test_key = ANY($3::text[])
+                      )
+                    """,
+                    course_filter, vertical_ids, test_keys,
+                ))
+                deleted['participant_state'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_participant_question_state WHERE test_key = ANY($1::text[])",
+                    test_keys,
+                ))
+                deleted['answers'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_answers WHERE test_key = ANY($1::text[])",
+                    test_keys,
+                ))
+                deleted['questions'] = self._command_count(await conn.execute(
+                    """
+                    DELETE FROM openedu_v2_questions
+                    WHERE test_key = ANY($4::text[])
+                       OR (
+                           course_id = $1
+                           AND ($2 = '' OR chapter_id = $2)
+                           AND ($3 = '' OR sequential_id = $3)
+                       )
+                    """,
+                    course_filter, chapter_id, sequential_id, test_keys,
+                ))
+                deleted['attempts'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_v2_attempts WHERE test_key = ANY($1::text[])",
+                    test_keys,
+                ))
+                deleted['frames'] = self._command_count(await conn.execute(
+                    """
+                    DELETE FROM openedu_v2_frames
+                    WHERE test_key = ANY($4::text[])
+                       OR (
+                           course_id = $1
+                           AND ($2 = '' OR chapter_id = $2)
+                           AND ($3 = '' OR sequential_id = $3)
+                       )
+                    """,
+                    course_filter, chapter_id, sequential_id, test_keys,
+                ))
+                deleted['tests'] = self._command_count(await conn.execute(
+                    """
+                    DELETE FROM openedu_v2_tests
+                    WHERE test_key = ANY($4::text[])
+                       OR (
+                           course_id = $1
+                           AND ($2 = '' OR chapter_id = $2)
+                           AND ($3 = '' OR sequential_id = $3)
+                       )
+                    """,
+                    course_filter, chapter_id, sequential_id, test_keys,
+                ))
+                deleted['verticals'] = self._command_count(await conn.execute(
+                    """
+                    DELETE FROM openedu_v2_verticals
+                    WHERE course_id = $1 AND ($2 = '' OR chapter_id = $2) AND ($3 = '' OR sequential_id = $3)
+                    """,
+                    course_filter, chapter_id, sequential_id,
+                ))
+                if sequential_id:
+                    deleted['sequentials'] = self._command_count(await conn.execute(
+                        "DELETE FROM openedu_v2_sequentials WHERE course_id = $1 AND sequential_id = $2",
+                        course_filter, sequential_id,
+                    ))
+                    deleted['chapters'] = 0
+                else:
+                    deleted['sequentials'] = self._command_count(await conn.execute(
+                        "DELETE FROM openedu_v2_sequentials WHERE course_id = $1 AND chapter_id = $2",
+                        course_filter, chapter_id,
+                    ))
+                    deleted['chapters'] = self._command_count(await conn.execute(
+                        "DELETE FROM openedu_v2_chapters WHERE course_id = $1 AND chapter_id = $2",
+                        course_filter, chapter_id,
+                    ))
+        return deleted
+
+    async def delete_admin_v2_chapter(self, course_id: str, chapter_id: str) -> dict[str, int]:
+        return await self._delete_admin_v2_scope(course_id, chapter_id=chapter_id)
+
+    async def delete_admin_v2_sequential(self, course_id: str, sequential_id: str) -> dict[str, int]:
+        return await self._delete_admin_v2_scope(course_id, sequential_id=sequential_id)
+
     async def delete_admin_v2_course(self, course_id: str) -> dict[str, int]:
         assert self.pool is not None
         course_filter = self._v2_admin_course_filter(course_id)

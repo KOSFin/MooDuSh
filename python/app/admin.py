@@ -2,7 +2,7 @@ import time
 from collections import defaultdict, deque
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from urllib.parse import quote, quote_plus
 
@@ -76,6 +76,12 @@ def _safe_admin_redirect(value: str, fallback: str = '/admin') -> str:
     if value.startswith('/admin') and not value.startswith('//') and '\n' not in value and '\r' not in value:
         return value
     return fallback
+
+
+def _wants_json(request: Request) -> bool:
+    accept = request.headers.get('accept', '')
+    requested_with = request.headers.get('x-requested-with', '')
+    return 'application/json' in accept.lower() or requested_with.lower() == 'fetch'
 
 
 # ── Login / Logout ─────────────────────────────────────────────────
@@ -252,7 +258,9 @@ async def admin_question_delete(
 ):
     _require_admin_or_login(request)
     verify_admin_csrf(request, csrf_token)
-    await database.delete_admin_question(test_key, question_key)
+    deleted = await database.delete_admin_question(test_key, question_key)
+    if _wants_json(request):
+        return JSONResponse({'ok': True, 'deleted': deleted})
     fallback = f'/admin/tests/{quote(test_key, safe="")}' if test_key else '/admin/questions'
     return RedirectResponse(url=_safe_admin_redirect(return_to, fallback), status_code=303)
 
@@ -312,8 +320,42 @@ async def admin_v2_course_delete(
 ):
     _require_admin_or_login(request)
     verify_admin_csrf(request, csrf_token)
-    await database.delete_admin_v2_course(course_id)
+    deleted = await database.delete_admin_v2_course(course_id)
+    if _wants_json(request):
+        return JSONResponse({'ok': True, 'deleted': deleted})
     return RedirectResponse(url='/admin/v2/courses', status_code=303)
+
+
+@admin_router.post('/admin/v2/chapters/delete')
+@admin_router.post('/api/admin/v2/chapters/delete')
+async def admin_v2_chapter_delete(
+    request: Request,
+    course_id: str = Form(...),
+    chapter_id: str = Form(...),
+    csrf_token: str = Form(..., alias=ADMIN_CSRF_FIELD),
+):
+    _require_admin_or_login(request)
+    verify_admin_csrf(request, csrf_token)
+    deleted = await database.delete_admin_v2_chapter(course_id, chapter_id)
+    if _wants_json(request):
+        return JSONResponse({'ok': True, 'deleted': deleted})
+    return RedirectResponse(url=f'/admin/v2/courses/{quote(course_id, safe="")}', status_code=303)
+
+
+@admin_router.post('/admin/v2/sequentials/delete')
+@admin_router.post('/api/admin/v2/sequentials/delete')
+async def admin_v2_sequential_delete(
+    request: Request,
+    course_id: str = Form(...),
+    sequential_id: str = Form(...),
+    csrf_token: str = Form(..., alias=ADMIN_CSRF_FIELD),
+):
+    _require_admin_or_login(request)
+    verify_admin_csrf(request, csrf_token)
+    deleted = await database.delete_admin_v2_sequential(course_id, sequential_id)
+    if _wants_json(request):
+        return JSONResponse({'ok': True, 'deleted': deleted})
+    return RedirectResponse(url=f'/admin/v2/courses/{quote(course_id, safe="")}', status_code=303)
 
 
 @admin_router.post('/admin/v2/questions/delete')
@@ -327,7 +369,9 @@ async def admin_v2_question_delete(
 ):
     _require_admin_or_login(request)
     verify_admin_csrf(request, csrf_token)
-    await database.delete_admin_v2_question(test_key, question_key)
+    deleted = await database.delete_admin_v2_question(test_key, question_key)
+    if _wants_json(request):
+        return JSONResponse({'ok': True, 'deleted': deleted})
     if course_id:
         return RedirectResponse(url=f'/admin/v2/courses/{quote(course_id, safe="")}', status_code=303)
     return RedirectResponse(url='/admin/v2/courses', status_code=303)

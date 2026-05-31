@@ -63,7 +63,7 @@
    "name": "MooDuSh",
    "permissions": [ "storage", "contextMenus" ],
    "update_url": "https://clients2.google.com/service/update2/crx",
-   "version": "3.0.7",
+   "version": "3.0.8",
    "web_accessible_resources": [ {
       "matches": [ "\u003Call_urls>" ],
       "resources": [ "css/widgets/context_menu.css" ],

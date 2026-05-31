@@ -78,7 +78,7 @@
         .tree { display: grid; gap: 10px; padding: 14px; }
         .tree-node { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
         .tree-node + .tree-node { margin-top: 8px; }
-        .tree-node summary { cursor: pointer; list-style: none; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 14px; }
+        .tree-node summary { cursor: pointer; list-style: none; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 12px 14px; }
         .tree-node summary::-webkit-details-marker { display: none; }
         .tree-node summary::before { content: "›"; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--accent-dark); background: #e4f5ef; font-size: 18px; transform: rotate(0deg); transition: transform 120ms ease; }
         .tree-node[open] > summary::before { transform: rotate(90deg); }
@@ -91,6 +91,7 @@
         .tree-content { display: grid; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--line-soft); }
         .tree-summary-main { min-width: 0; }
         .tree-summary-stats { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+        .tree-summary-actions { display: inline-flex; align-items: center; gap: 6px; }
         .vertical-questions { display: grid; gap: 8px; }
         .compact-question { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 11px; display: grid; gap: 9px; }
         .compact-question-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -126,6 +127,7 @@
         .pagination a.active { background: var(--nav); color: #fff; border-color: var(--nav); }
         .empty { padding: 18px; color: var(--muted); font-size: 13px; }
         .is-hidden { display: none !important; }
+        .is-removing { opacity: 0.55; pointer-events: none; }
         @media (max-width: 860px) {
             .layout { grid-template-columns: 1fr; }
             .sidebar { position: static; height: auto; }
@@ -137,7 +139,7 @@
             .question-row { grid-template-columns: 1fr; }
             .metric-grid { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .tree-node summary { grid-template-columns: 22px minmax(0, 1fr); }
-            .tree-summary-stats { grid-column: 2; justify-content: flex-start; }
+            .tree-summary-stats, .tree-summary-actions { grid-column: 2; justify-content: flex-start; }
             .tree-node-level-2, .tree-node-level-3 { margin-left: 0; }
             .compact-question-head { display: grid; }
             .header-actions, .section-head { justify-content: flex-start; }
@@ -182,6 +184,49 @@
             </div>
         </main>
     </div>
+    <script>
+    (() => {
+        document.addEventListener('click', (event) => {
+            if (event.target.closest('[data-no-toggle]')) {
+                event.stopPropagation();
+            }
+        }, true);
+
+        document.addEventListener('submit', async (event) => {
+            const form = event.target instanceof HTMLFormElement ? event.target : null;
+            if (!form || !form.matches('[data-ajax-delete]')) {
+                return;
+            }
+
+            event.preventDefault();
+            const removeSelector = form.getAttribute('data-remove-target') || '[data-admin-delete-row]';
+            const target = form.closest(removeSelector) || form.closest('[data-admin-delete-row]');
+            form.classList.add('is-removing');
+            target?.classList.add('is-removing');
+
+            try {
+                const response = await fetch(form.action, {
+                    method: form.method || 'POST',
+                    body: new FormData(form),
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'fetch'
+                    }
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || payload.ok === false) {
+                    throw new Error(payload.detail || payload.error || 'delete_failed');
+                }
+                if (target) {
+                    target.remove();
+                }
+            } catch (_) {
+                form.classList.remove('is-removing');
+                target?.classList.remove('is-removing');
+            }
+        });
+    })();
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

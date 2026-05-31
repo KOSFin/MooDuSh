@@ -60,6 +60,72 @@
             .replace(/&amp;/g, '&');
     }
 
+    function parseDataLiteral(value) {
+        const raw = decodeHtml(String(value || '').trim());
+        if (!raw) {
+            return null;
+        }
+        if (typeof shared.parsePythonishDataLiteral === 'function') {
+            return shared.parsePythonishDataLiteral(raw);
+        }
+
+        try {
+            return JSON.parse(raw);
+        } catch (_) {
+            // Continue with a small Python-literal fallback for OpenEdu configs.
+        }
+
+        try {
+            const jsonish = raw
+                .replace(/'/g, '"')
+                .replace(/\bTrue\b/g, 'true')
+                .replace(/\bFalse\b/g, 'false')
+                .replace(/\bNone\b/g, 'null');
+            return JSON.parse(jsonish);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function findBalancedObjectLiteral(source, startIndex) {
+        const text = String(source || '');
+        const start = text.indexOf('{', Math.max(0, Number(startIndex || 0)));
+        if (start < 0) {
+            return '';
+        }
+
+        let depth = 0;
+        let quote = '';
+        let escaped = false;
+        for (let index = start; index < text.length; index += 1) {
+            const ch = text[index];
+            if (quote) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch === '\\') {
+                    escaped = true;
+                } else if (ch === quote) {
+                    quote = '';
+                }
+                continue;
+            }
+
+            if (ch === '"' || ch === "'") {
+                quote = ch;
+                continue;
+            }
+            if (ch === '{') {
+                depth += 1;
+            } else if (ch === '}') {
+                depth -= 1;
+                if (depth === 0) {
+                    return text.slice(start, index + 1);
+                }
+            }
+        }
+        return '';
+    }
+
     function cleanPromptText(value) {
         const text = collapseWhitespace(String(value || '')
             .replace(PROMPT_NOISE_RE, ' ')
@@ -317,6 +383,159 @@
         return sanitizePrompt(contextText || nearbyPrompt(root), answerTexts);
     }
 
+    function naturalQuestionIdCompare(a, b) {
+        const left = String(a || '');
+        const right = String(b || '');
+        const leftMatch = left.match(/(\d+)$/);
+        const rightMatch = right.match(/(\d+)$/);
+        if (leftMatch && rightMatch) {
+            const numeric = Number(leftMatch[1]) - Number(rightMatch[1]);
+            if (numeric !== 0) {
+                return numeric;
+            }
+        }
+        return left.localeCompare(right);
+    }
+
+    function getPhilosophyTestConfig(root) {
+        const scripts = Array.from(root.querySelectorAll?.('script') || [])
+            .map((script) => String(script.textContent || ''))
+            .filter((text) => /new\s+PhilosophyTest\s*\(/.test(text) && /\bquestions\s*:/.test(text));
+        const scriptText = scripts[0] || '';
+        if (!scriptText) {
+            return null;
+        }
+
+        const questionsIndex = scriptText.search(/\bquestions\s*:/);
+        const questionsLiteral = findBalancedObjectLiteral(scriptText, questionsIndex);
+        const questions = parseDataLiteral(questionsLiteral);
+        if (!questions || typeof questions !== 'object') {
+            return null;
+        }
+
+        const typeMatch = scriptText.match(/\btype\s*:\s*["']([^"']+)["']/);
+        const inputSelectorMatch = scriptText.match(/\binput\s*:\s*document\.querySelector\(\s*["']([^"']+)["']\s*\)/);
+        return {
+            questions,
+            inputType: collapseWhitespace(typeMatch?.[1] || 'checkbox').toLowerCase() === 'radio' ? 'radio' : 'checkbox',
+            inputSelector: inputSelectorMatch?.[1] || ''
+        };
+    }
+
+    function getPhilosophyTestSelectedAnswers(root, config) {
+        const selected = {};
+        const doc = root.ownerDocument || document;
+        let inputHost = null;
+        if (config?.inputSelector && doc?.querySelector) {
+            try {
+                inputHost = doc.querySelector(config.inputSelector);
+            } catch (_) {
+                inputHost = null;
+            }
+        }
+        if (!inputHost || typeof inputHost.querySelector !== 'function') {
+            inputHost = root.querySelector?.('[id^="philosophy_test_input_"]') || null;
+        }
+
+        const input = inputHost?.querySelector?.('input[type="text"], input[type="hidden"], textarea')
+            || root.querySelector?.('[id^="philosophy_test_input_"] input[type="text"], [id^="philosophy_test_input_"] input[type="hidden"], [id^="philosophy_test_input_"] textarea');
+        const rawValue = (input?.value && input.value !== '{' ? input.value : '')
+            || input?.textContent
+            || extractPhilosophyTestInputValueFromRawContent(doc, config);
+        const parsed = parseDataLiteral(rawValue);
+        const answers = parsed?.answer?.answers;
+        if (!answers || typeof answers !== 'object') {
+            return selected;
+        }
+
+        Object.keys(answers).forEach((questionId) => {
+            const values = Array.isArray(answers[questionId]) ? answers[questionId] : [answers[questionId]];
+            selected[questionId] = new Set(values.map((item) => String(item || '').trim()).filter(Boolean));
+        });
+        return selected;
+    }
+
+    function extractPhilosophyTestInputValueFromRawContent(doc, config) {
+        const raw = String(doc?.__PARAMEXT_RAW_CONTENT || '');
+        if (!raw) {
+            return '';
+        }
+
+        const hostId = String(config?.inputSelector || '').match(/^#([\w-]+)$/)?.[1] || '';
+        const escapedHostId = hostId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hostMatch = escapedHostId
+            ? raw.match(new RegExp('id=(?:"|&#34;|&quot;)' + escapedHostId + '(?:"|&#34;|&quot;)', 'i'))
+            : null;
+        const search = hostMatch ? raw.slice(hostMatch.index || 0) : raw;
+        const valueMatch = search.match(/(?:<|&lt;)input\b[\s\S]*?\bvalue=(?:"([^"]*)"|&#34;([\s\S]*?)&#34;|&quot;([\s\S]*?)&quot;)/i);
+        return decodeHtml(valueMatch?.[1] || valueMatch?.[2] || valueMatch?.[3] || '');
+    }
+
+    function isPhilosophyTestInputBlock(root) {
+        return Boolean(root?.closest?.('[id^="philosophy_test_input_"]'))
+            || Boolean(root?.querySelector?.('[id^="philosophy_test_input_"]'));
+    }
+
+    function buildPhilosophyTestQuestions(doc, options) {
+        const result = [];
+        const roots = Array.from(doc.querySelectorAll('[data-problem-id], .problems-wrapper, .xblock-student_view-problem, body'));
+        const seenFingerprints = new Set();
+
+        roots.forEach((root) => {
+            const config = getPhilosophyTestConfig(root);
+            if (!config) {
+                return;
+            }
+
+            const selectedByQuestion = getPhilosophyTestSelectedAnswers(root, config);
+            const sourceFrame = options?.sourceUrl || doc.__PARAMEXT_SOURCE_PATH || '';
+            const problemId = root.getAttribute('data-problem-id') || root.id || '';
+
+            Object.keys(config.questions).sort(naturalQuestionIdCompare).forEach((questionId) => {
+                const sourceQuestion = config.questions[questionId];
+                const prompt = sanitizePrompt(sourceQuestion?.text || questionId, []);
+                const answers = (Array.isArray(sourceQuestion?.answers) ? sourceQuestion.answers : [])
+                    .map((answer, answerIndex) => {
+                        const letter = collapseWhitespace(answer?.let || answer?.letter || answer?.value || '');
+                        const answerText = sanitizeAnswer(answer?.text || letter || ('answer_' + String(answerIndex + 1)));
+                        return {
+                            answerKey: 'philosophy:' + questionId + ':' + (letter || String(answerIndex + 1)),
+                            answerText,
+                            inputType: config.inputType,
+                            selected: Boolean(selectedByQuestion[questionId]?.has(letter)),
+                            correct: false,
+                            incorrect: false,
+                            answerFingerprint: hashText(answerText || letter || String(answerIndex + 1))
+                        };
+                    })
+                    .filter((answer) => answer.answerText);
+                const answerTexts = answers.map((answer) => answer.answerText);
+                const questionFingerprint = fingerprintQuestion(prompt, answerTexts);
+                if (!prompt || answers.length === 0 || seenFingerprints.has(questionFingerprint)) {
+                    return;
+                }
+                seenFingerprints.add(questionFingerprint);
+
+                const question = {
+                    questionKey: 'qv2_' + questionFingerprint,
+                    prompt,
+                    questionType: config.inputType === 'radio' ? 'single_choice' : 'multiple_choice',
+                    questionFingerprint,
+                    parserSource: 'openedu_parser_philosophy_test',
+                    parseConfidence: 0,
+                    rawType: 'philosophy_test',
+                    problemId,
+                    answers,
+                    sourceFrame
+                };
+                question.parseConfidence = confidenceFor(question);
+                result.push(question);
+            });
+        });
+
+        return result;
+    }
+
     function parseEmbeddedDocuments(doc) {
         const embedded = [];
         doc.querySelectorAll('[data-content]').forEach((node) => {
@@ -328,6 +547,7 @@
             const child = doc.implementation.createHTMLDocument('openedu-frame');
             child.body.innerHTML = decoded;
             child.__PARAMEXT_SOURCE_PATH = node.getAttribute('data-usage-id') || node.getAttribute('data-id') || doc.__PARAMEXT_SOURCE_PATH || '';
+            child.__PARAMEXT_RAW_CONTENT = raw;
             embedded.push(child);
         });
         return embedded;
@@ -425,12 +645,18 @@
         const roots = getQuestionBlocks(doc);
         const seen = new Set();
         const questions = buildDragQuestions(doc, options);
+        buildPhilosophyTestQuestions(doc, options).forEach((question) => {
+            questions.push(question);
+        });
         questions.forEach((question) => {
             seen.add(question.questionFingerprint || question.questionKey);
         });
 
         roots.forEach((block, index) => {
             if (block.querySelector('table.drag-table, table.answerPlaceStudent') && block.querySelector('.dragAnswer[id]')) {
+                return;
+            }
+            if (isPhilosophyTestInputBlock(block)) {
                 return;
             }
             const inputs = Array.from(block.querySelectorAll(INPUT_SELECTOR))

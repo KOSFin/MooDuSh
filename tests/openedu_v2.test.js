@@ -221,6 +221,38 @@ test('OpenEdu V2 parser keeps inline select gap-fill questions together', { skip
     );
 });
 
+test('OpenEdu V2 parser expands PhilosophyTest questions without correct answers', { skip: !fs.existsSync(path.join(__dirname, '..', 'test-files', 'test21.html')) }, () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'test-files', 'test21.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://apps.openedu.ru/' });
+    const questions = parser.parseDocumentTree(dom.window.document, { sourceUrl: 'test21.html' })
+        .filter((question) => question.rawType === 'philosophy_test');
+
+    assert.ok(questions.length > 0);
+    assert.equal(questions[0].questionType, 'multiple_choice');
+    assert.equal(questions[0].prompt, 'Задача философии:');
+    assert.ok(questions.every((question) => !question.answers.some((answer) => answer.correct || answer.incorrect)));
+    assert.ok(questions.every((question) => !question.answers.some((answer) => answer.selected)));
+});
+
+test('OpenEdu V2 parser reads selected PhilosophyTest statistics from submitted value', { skip: !fs.existsSync(path.join(__dirname, '..', 'test-files', 'test22.html')) }, () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'test-files', 'test22.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://apps.openedu.ru/' });
+    const questions = parser.parseDocumentTree(dom.window.document, { sourceUrl: 'test22.html' })
+        .filter((question) => question.rawType === 'philosophy_test');
+
+    assert.deepEqual(
+        questions.map((question) => question.answers.filter((answer) => answer.selected).map((answer) => answer.answerText)),
+        [
+            ['Вопрошать'],
+            ['Задавать вопросы'],
+            ['Логическая ошибка'],
+            ['Порождает идеи'],
+            ['Феномен бытия'],
+            ['Субъект высказываний'],
+        ],
+    );
+});
+
 test('OpenEdu course map merge keeps real chapter ids over synthetic sequence ids', () => {
     const merged = courseApi.mergeCourseMaps([
         {
