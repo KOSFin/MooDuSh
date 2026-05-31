@@ -173,6 +173,17 @@
     }
 
     function mergeCourseMaps(primary, secondary) {
+        function isSyntheticId(value) {
+            return /^(chapter|sequential|vertical)@/i.test(String(value || '').trim());
+        }
+
+        function shouldPreferPreviousId(key, incoming, previous) {
+            if (!/(chapterId|sequentialId|verticalId)$/.test(String(key || ''))) {
+                return false;
+            }
+            return previous && !isSyntheticId(previous) && isSyntheticId(incoming);
+        }
+
         function mergeValue(incoming, previous) {
             return incoming === '' || incoming === null || typeof incoming === 'undefined'
                 ? previous
@@ -182,6 +193,9 @@
         function mergeItem(previous, incoming) {
             const result = Object.assign({}, previous);
             Object.keys(incoming || {}).forEach((key) => {
+                if (shouldPreferPreviousId(key, incoming[key], result[key])) {
+                    return;
+                }
                 result[key] = mergeValue(incoming[key], result[key]);
             });
             return result;

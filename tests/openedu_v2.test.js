@@ -220,3 +220,30 @@ test('OpenEdu V2 parser keeps inline select gap-fill questions together', { skip
         ['достоверного', 'опыт', 'разуме', 'игнорирование', 'эмпиризма'],
     );
 });
+
+test('OpenEdu course map merge keeps real chapter ids over synthetic sequence ids', () => {
+    const merged = courseApi.mergeCourseMaps([
+        {
+            courseId: 'course-v1:urfu+PHILOSOPHY+spring_2026',
+            chapterId: 'block-v1:urfu+PHILOSOPHY+spring_2026+type@chapter+block@real',
+            chapterTitle: 'Раздел 4. Философия Нового времени',
+            sequentialId: 'block-v1:urfu+PHILOSOPHY+spring_2026+type@sequential+block@seq',
+            sequentialTitle: 'Тема 11. Философия как теория познания',
+            verticalId: 'block-v1:urfu+PHILOSOPHY+spring_2026+type@vertical+block@v1',
+            verticalTitle: 'Тестовые задания'
+        }
+    ], [
+        {
+            courseId: 'course-v1:urfu+PHILOSOPHY+spring_2026',
+            chapterId: 'chapter@d2f10f0c',
+            chapterTitle: 'Раздел 4. Философия Нового времени',
+            sequentialId: 'block-v1:urfu+PHILOSOPHY+spring_2026+type@sequential+block@seq',
+            sequentialTitle: 'Тема 11. Философия как теория познания',
+            verticalId: 'block-v1:urfu+PHILOSOPHY+spring_2026+type@vertical+block@v1',
+            verticalTitle: 'Тестовые задания'
+        }
+    ]);
+
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].chapterId, 'block-v1:urfu+PHILOSOPHY+spring_2026+type@chapter+block@real');
+});

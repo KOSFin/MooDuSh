@@ -500,6 +500,9 @@
             }
             scheduleCycle(true, String(event.data.source || 'top-force-sync'), { allowNetwork: true });
         } else if (event.data.type === 'PARAMEXT_OPENEDU_SCROLL_QUESTION') {
+            if (!isTopFrame && event.data.frameId && event.data.frameId !== frameSyncId) {
+                return;
+            }
             const reference = event.data.question || {
                 questionKey: event.data.questionKey,
                 domId: event.data.domId || '',
@@ -514,6 +517,9 @@
                 scrollToQuestion(question);
             }
         } else if (event.data.type === 'PARAMEXT_APPLY_ANSWERS' || event.data.type === 'PARAMEXT_APPLY_ANSWER') {
+            if (!isTopFrame && event.data.frameId && event.data.frameId !== frameSyncId) {
+                return;
+            }
             const reference = event.data.question || {
                 questionKey: event.data.questionKey,
                 domId: event.data.domId || '',
@@ -4290,7 +4296,8 @@
                         options: Array.isArray(question.options) ? question.options : []
                     },
                     answers: Array.isArray(answers) ? answers : [],
-                    mode: typeof mode === 'string' ? mode : 'add'
+                    mode: typeof mode === 'string' ? mode : 'add',
+                    frameId: question.frameId || ''
                 })
                 : false;
         }
@@ -4305,7 +4312,8 @@
                     options: Array.isArray(question.options) ? question.options : []
                 },
                 answers: Array.isArray(answers) ? answers : [],
-                mode: typeof mode === 'string' ? mode : 'add'
+                mode: typeof mode === 'string' ? mode : 'add',
+                frameId: question.frameId || ''
             });
         }
 
@@ -5628,7 +5636,8 @@
                     domId: question.domId,
                     prompt: question.prompt,
                     options: Array.isArray(question.options) ? question.options : []
-                }
+                },
+                frameId: question.frameId || ''
             });
         }
 
@@ -6738,6 +6747,239 @@
         return completedCount > 0 ? ('популярный · ' + completedCount) : 'популярный';
     }
 
+    function buildQuestionAiExport(items) {
+        return (Array.isArray(items) ? items : []).map((item) => {
+            const question = item.question || {};
+            const stats = item.stats || createEmptyStatsEntry();
+            return {
+                index: Number(item.index || 0) + 1,
+                questionKey: String(question.questionKey || ''),
+                type: String(question.questionType || 'unknown'),
+                prompt: collapseWhitespace(question.prompt || ''),
+                options: (Array.isArray(question.options) ? question.options : [])
+                    .map((option) => ({
+                        answerKey: String(option.answerKey || ''),
+                        answerText: sanitizeAnswerText(option.answerText || ''),
+                        inputType: String(option.inputType || '')
+                    }))
+                    .filter((option) => option.answerText),
+                knownAnswers: {
+                    verified: normalizeAnswerStatsList(stats.verifiedAnswers).map((answer) => answer.answerText),
+                    popular: normalizeAnswerStatsList(stats.fallbackAnswers).map((answer) => answer.answerText),
+                    incorrect: normalizeAnswerStatsList(stats.incorrectAnswers).map((answer) => answer.answerText)
+                }
+            };
+        });
+    }
+
+    function buildAiPromptText(items) {
+        const payload = buildQuestionAiExport(items);
+        return [
+            'Ниже список вопросов OpenEdu. Нужно определить правильные ответы.',
+            'Используй options как список доступных вариантов. knownAnswers.verified уже подтверждены платформой, knownAnswers.popular могут быть подсказкой, knownAnswers.incorrect выбирать нельзя.',
+            'Верни только валидный JSON без markdown. Формат строго такой:',
+            '{"answers":[{"index":1,"answers":["точный текст ответа"]},{"questionKey":"...","answers":[{"answerKey":"...","answerText":"..."}]}]}',
+            'Для matching/select/multiple_choice можно указывать несколько answers. Для text_input укажи строку ответа.',
+            '',
+            JSON.stringify({ questions: payload }, null, 2)
+        ].join('\n');
+    }
+
+    async function copyTextToClipboard(text) {
+        const value = String(text || '');
+        if (!value) {
+            return false;
+        }
+
+        try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                await navigator.clipboard.writeText(value);
+                return true;
+            }
+        } catch (_) {
+            // Fall through to the legacy copy path.
+        }
+
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = value;
+            textarea.setAttribute('readonly', 'readonly');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.documentElement.appendChild(textarea);
+            textarea.select();
+            const copied = document.execCommand('copy');
+            textarea.remove();
+            return copied;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function setTemporaryButtonText(button, text) {
+        if (!(button instanceof HTMLButtonElement)) {
+            return;
+        }
+        const original = button.textContent || '';
+        button.textContent = text;
+        setTimeout(() => {
+            if (button.isConnected) {
+                button.textContent = original;
+            }
+        }, 1600);
+    }
+
+    function showAiPromptHelp() {
+        window.alert([
+            '1. Нажми «Копировать» и отправь промпт в ИИ.',
+            '2. ИИ должен вернуть только JSON в формате {"answers":[{"index":1,"answers":["..."]}]} .',
+            '3. Нажми «Вставить JSON», вставь ответ ИИ и примени. MooDuSh сопоставит ответы с вопросами и заполнит поля.'
+        ].join('\n'));
+    }
+
+    function parseImportedAnswers(raw) {
+        let parsed = null;
+        try {
+            parsed = JSON.parse(String(raw || '').trim());
+        } catch (_) {
+            return [];
+        }
+
+        if (Array.isArray(parsed)) {
+            return parsed;
+        }
+        if (Array.isArray(parsed?.answers)) {
+            return parsed.answers;
+        }
+        if (Array.isArray(parsed?.questions)) {
+            return parsed.questions;
+        }
+        return [];
+    }
+
+    function normalizeImportedAnswerList(entry) {
+        const raw = Array.isArray(entry?.answers)
+            ? entry.answers
+            : (Array.isArray(entry?.answer)
+                ? entry.answer
+                : [entry?.answer || entry?.answerText || entry?.text || entry]);
+
+        return raw
+            .map((answer) => {
+                if (answer && typeof answer === 'object') {
+                    return {
+                        answerKey: String(answer.answerKey || answer.key || ''),
+                        answerText: String(answer.answerText || answer.text || answer.value || '').trim()
+                    };
+                }
+                return { answerKey: '', answerText: String(answer || '').trim() };
+            })
+            .filter((answer) => answer.answerKey || answer.answerText);
+    }
+
+    function findImportedQuestionItem(items, entry) {
+        const list = Array.isArray(items) ? items : [];
+        const index = Number(entry?.index || entry?.questionIndex || entry?.number || 0);
+        if (Number.isInteger(index) && index > 0 && index <= list.length) {
+            return list[index - 1];
+        }
+
+        const key = collapseWhitespace(entry?.questionKey || entry?.key || '');
+        if (key) {
+            const byKey = list.find((item) => collapseWhitespace(item.question?.questionKey || '') === key);
+            if (byKey) {
+                return byKey;
+            }
+        }
+
+        const prompt = normalizeText(entry?.prompt || entry?.question || '');
+        if (prompt) {
+            return list.find((item) => normalizeText(item.question?.prompt || '') === prompt) || null;
+        }
+
+        return null;
+    }
+
+    function applyImportedAnswers(items, rawJson) {
+        const entries = parseImportedAnswers(rawJson);
+        let appliedCount = 0;
+        let matchedCount = 0;
+
+        entries.forEach((entry) => {
+            const item = findImportedQuestionItem(items, entry);
+            if (!item?.question) {
+                return;
+            }
+            const answers = normalizeImportedAnswerList(entry);
+            if (answers.length === 0) {
+                return;
+            }
+            matchedCount += 1;
+            if (requestApplyAnswers(item.question, answers, 'set-all')) {
+                appliedCount += 1;
+            }
+        });
+
+        return { entries: entries.length, matchedCount, appliedCount };
+    }
+
+    function showJsonImportPanel(container, items) {
+        if (!(container instanceof HTMLElement)) {
+            return;
+        }
+
+        const existing = container.querySelector('.moodush-stick-import-panel');
+        if (existing) {
+            existing.remove();
+            return;
+        }
+
+        const panel = document.createElement('div');
+        panel.className = 'moodush-stick-import-panel';
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'moodush-stick-import-textarea';
+        textarea.placeholder = '{"answers":[{"index":1,"answers":["ответ"]}]}';
+        panel.appendChild(textarea);
+
+        const controls = document.createElement('div');
+        controls.className = 'moodush-stick-import-controls';
+
+        const applyButton = document.createElement('button');
+        applyButton.type = 'button';
+        applyButton.className = 'moodush-stick-tool moodush-stick-tool--primary';
+        applyButton.textContent = 'Применить';
+        applyButton.addEventListener('click', () => {
+            const result = applyImportedAnswers(items, textarea.value);
+            applyButton.textContent = 'Готово ' + String(result.appliedCount) + '/' + String(result.entries);
+            setTimeout(() => {
+                if (panel.isConnected) {
+                    panel.remove();
+                }
+            }, result.appliedCount > 0 ? 1200 : 2200);
+        });
+
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'moodush-stick-tool';
+        cancelButton.textContent = 'Отмена';
+        cancelButton.addEventListener('click', () => {
+            panel.remove();
+        });
+
+        controls.appendChild(applyButton);
+        controls.appendChild(cancelButton);
+        panel.appendChild(controls);
+
+        const summary = container.querySelector('.moodush-stick-summary');
+        if (summary?.nextSibling) {
+            container.insertBefore(panel, summary.nextSibling);
+        } else {
+            container.prepend(panel);
+        }
+        textarea.focus();
+    }
+
     function buildQuestionCard(question, index, stats) {
         const card = document.createElement('div');
         card.className = 'moodush-question-card';
@@ -6935,6 +7177,40 @@
             + ' · без ответа: ' + String(missingCount);
         stickBody.appendChild(summary);
 
+        const tools = document.createElement('div');
+        tools.className = 'moodush-stick-tools';
+
+        const copyPromptButton = document.createElement('button');
+        copyPromptButton.type = 'button';
+        copyPromptButton.className = 'moodush-stick-tool moodush-stick-tool--primary';
+        copyPromptButton.textContent = 'Копировать';
+        copyPromptButton.title = 'Скопировать промпт со списком вопросов для ИИ';
+        copyPromptButton.addEventListener('click', async () => {
+            const copied = await copyTextToClipboard(buildAiPromptText(items));
+            setTemporaryButtonText(copyPromptButton, copied ? 'Скопировано' : 'Не вышло');
+        });
+
+        const importButton = document.createElement('button');
+        importButton.type = 'button';
+        importButton.className = 'moodush-stick-tool';
+        importButton.textContent = 'Вставить JSON';
+        importButton.title = 'Вставить JSON с ответами и применить их на странице';
+        importButton.addEventListener('click', () => {
+            showJsonImportPanel(stickBody, items);
+        });
+
+        const helpButton = document.createElement('button');
+        helpButton.type = 'button';
+        helpButton.className = 'moodush-stick-tool moodush-stick-tool--icon';
+        helpButton.textContent = '?';
+        helpButton.title = 'Как пользоваться копированием и вставкой JSON';
+        helpButton.addEventListener('click', showAiPromptHelp);
+
+        tools.appendChild(copyPromptButton);
+        tools.appendChild(importButton);
+        tools.appendChild(helpButton);
+        stickBody.appendChild(tools);
+
         const filters = document.createElement('div');
         filters.className = 'moodush-stick-tabs';
         const list = document.createElement('div');
@@ -7094,6 +7370,7 @@
         try {
             const simplifiedQuestions = (Array.isArray(questions) ? questions : []).map((question) => ({
                 questionKey: question.questionKey,
+                frameId: frameSyncId,
                 domId: question.domId,
                 correct: question.correct,
                 hasVerifiedAnswer: question.hasVerifiedAnswer,

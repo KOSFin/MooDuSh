@@ -2949,30 +2949,102 @@ class Database:
                 'question_count': sum(int(v.get('question_count') or 0) for v in seq_verticals),
             })
 
-        sequentials_by_chapter: dict[str, list[dict[str, Any]]] = {}
-        for item in sequential_items:
-            item['verticals'] = verticals_by_seq.get(item.get('sequential_id') or '', [])
-            sequentials_by_chapter.setdefault(item.get('chapter_id') or '', []).append(item)
-
         chapter_items = [dict(r) for r in chapters]
         known_chapter_ids = {str(item.get('chapter_id') or '') for item in chapter_items}
-        for chapter_id, chapter_sequentials in sequentials_by_chapter.items():
+        for item in sequential_items:
+            chapter_id = str(item.get('chapter_id') or '')
             if chapter_id in known_chapter_ids:
                 continue
+            known_chapter_ids.add(chapter_id)
             chapter_items.append({
                 'chapter_id': chapter_id,
                 'title': 'Без раздела' if not chapter_id else chapter_id,
-                'sequential_count': len(chapter_sequentials),
-                'vertical_count': sum(int(seq.get('vertical_count') or 0) for seq in chapter_sequentials),
-                'question_count': sum(int(seq.get('question_count') or 0) for seq in chapter_sequentials),
+                'sequential_count': 0,
+                'vertical_count': 0,
+                'question_count': 0,
             })
 
+        def is_synthetic_hierarchy_id(value: Any) -> bool:
+            return str(value or '').startswith(('chapter@', 'sequential@', 'vertical@'))
+
+        def chapter_group_key(item: dict[str, Any]) -> str:
+            title = collapse_whitespace(item.get('title') or '')
+            if title and title != 'Без раздела':
+                return 'title:' + title.casefold()
+            return 'id:' + str(item.get('chapter_id') or '')
+
+        chapter_groups: dict[str, dict[str, Any]] = {}
         for item in chapter_items:
-            item['sequentials'] = sequentials_by_chapter.get(item.get('chapter_id') or '', [])
+            chapter_id = str(item.get('chapter_id') or '')
+            key = chapter_group_key(item)
+            existing = chapter_groups.get(key)
+            if not existing:
+                chapter_groups[key] = {
+                    'chapter_id': chapter_id,
+                    'title': item.get('title') or ('Без раздела' if not chapter_id else chapter_id),
+                    'sequential_count': 0,
+                    'vertical_count': 0,
+                    'question_count': 0,
+                    'sequentials': [],
+                    '_aliases': [chapter_id],
+                }
+                continue
+
+            existing_id = str(existing.get('chapter_id') or '')
+            existing.setdefault('_aliases', []).append(chapter_id)
+            if is_synthetic_hierarchy_id(existing_id) and chapter_id and not is_synthetic_hierarchy_id(chapter_id):
+                existing['chapter_id'] = chapter_id
+                existing_id = chapter_id
+            if not existing.get('title') or str(existing.get('title')) == existing_id:
+                existing['title'] = item.get('title') or existing.get('title') or chapter_id
+
+        chapter_aliases: dict[str, str] = {}
+        for item in chapter_groups.values():
+            canonical_id = str(item.get('chapter_id') or '')
+            for alias in item.get('_aliases') or []:
+                chapter_aliases[str(alias or '')] = canonical_id
+
+        canonical_chapter_ids = {str(item.get('chapter_id') or '') for item in chapter_groups.values()}
+        sequentials_by_chapter: dict[str, list[dict[str, Any]]] = {}
+        for item in sequential_items:
+            item['verticals'] = verticals_by_seq.get(item.get('sequential_id') or '', [])
+            item['vertical_count'] = len(item['verticals'])
+            item['question_count'] = sum(int(v.get('question_count') or 0) for v in item['verticals'])
+            raw_chapter_id = str(item.get('chapter_id') or '')
+            chapter_id = chapter_aliases.get(raw_chapter_id, raw_chapter_id)
+            item['chapter_id'] = chapter_id
+            for vertical in item['verticals']:
+                vertical['chapter_id'] = chapter_id
+            if chapter_id not in canonical_chapter_ids:
+                chapter_groups['id:' + chapter_id] = {
+                    'chapter_id': chapter_id,
+                    'title': 'Без раздела' if not chapter_id else chapter_id,
+                    'sequential_count': 0,
+                    'vertical_count': 0,
+                    'question_count': 0,
+                    'sequentials': [],
+                    '_aliases': [chapter_id],
+                }
+                canonical_chapter_ids.add(chapter_id)
+            sequentials_by_chapter.setdefault(chapter_id, []).append(item)
+
+        chapter_items = list(chapter_groups.values())
+        for item in chapter_items:
+            item.pop('_aliases', None)
+            seqs = sequentials_by_chapter.get(str(item.get('chapter_id') or ''), [])
+            item['sequentials'] = seqs
+            item['sequential_count'] = len(seqs)
+            item['vertical_count'] = sum(int(seq.get('vertical_count') or 0) for seq in seqs)
+            item['question_count'] = sum(int(seq.get('question_count') or 0) for seq in seqs)
+
+        counters_dict = dict(counters or {})
+        counters_dict['chapters'] = len(chapter_items)
+        counters_dict['sequentials'] = len(sequential_items)
+        counters_dict['verticals'] = len(vertical_items)
 
         return {
             'course': dict(course),
-            'counters': dict(counters or {}),
+            'counters': counters_dict,
             'chapters': chapter_items,
             'sequentials': sequential_items,
             'verticals': vertical_items,
