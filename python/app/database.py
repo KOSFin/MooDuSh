@@ -1505,6 +1505,11 @@ class Database:
                         question_fingerprint,
                         len(answer_texts),
                     )
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+                        context['testKey'],
+                        participant_key + '|' + question_key,
+                    )
 
                     answer_text_by_key: dict[str, str] = {}
                     answer_norm_by_key: dict[str, str] = {}
@@ -1539,7 +1544,7 @@ class Database:
 
                     previous_state = await conn.fetchrow(
                         """
-                        SELECT verified_answer_keys, incorrect_answer_keys, is_correct
+                        SELECT selected_answer_keys, verified_answer_keys, incorrect_answer_keys, is_correct
                         FROM openedu_participant_question_state
                         WHERE test_key = $1 AND participant_key = $2 AND question_key = $3
                         """,
@@ -1548,6 +1553,7 @@ class Database:
                         question_key,
                     )
 
+                    prev_selected_keys = set(previous_state['selected_answer_keys'] or []) if previous_state else set()
                     prev_verified_keys = set(previous_state['verified_answer_keys'] or []) if previous_state else set()
                     prev_incorrect_keys = set(previous_state['incorrect_answer_keys'] or []) if previous_state else set()
                     prev_is_correct = bool(previous_state['is_correct']) if previous_state else False
@@ -1587,12 +1593,13 @@ class Database:
                         completed_delta,
                     )
 
-                    # Counts are per distinct attempt, not per participant state
-                    # delta. The attempt fingerprint already deduplicates
-                    # repeated identical snapshots from the same actor.
-                    selected_increment_keys = selected_answer_keys
-                    verified_increment_keys = current_verified_answer_keys
-                    incorrect_increment_keys = current_incorrect_answer_keys
+                    # Counts are per participant-state delta. The same actor can
+                    # send several slightly different DOM snapshots for one
+                    # submit, so repeated identical answer facts must be idempotent.
+                    selected_increment_keys = selected_answer_keys - prev_selected_keys
+                    verified_increment_keys = current_verified_answer_keys - prev_verified_keys
+                    incorrect_increment_keys = current_incorrect_answer_keys - prev_incorrect_keys
+                    stored_selected_answer_keys = selected_answer_keys | prev_selected_keys
 
                     for answer_key in (selected_increment_keys | verified_increment_keys | incorrect_increment_keys):
                         selected_inc = 1 if answer_key in selected_increment_keys else 0
@@ -1632,7 +1639,7 @@ class Database:
                                       updated_at = NOW()
                         """,
                         context['testKey'], participant_key, question_key,
-                        sorted(selected_answer_keys), sorted(verified_answer_keys), sorted(incorrect_answer_keys),
+                        sorted(stored_selected_answer_keys), sorted(verified_answer_keys), sorted(incorrect_answer_keys),
                         question_correct, user_id,
                     )
 
@@ -1850,6 +1857,12 @@ class Database:
                         )
                         continue
 
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+                        context['testKey'],
+                        participant_key + '|' + question_key,
+                    )
+
                     accepted += 1
                     question_correct = bool(question.get('isCorrect'))
                     selected_key_list = merge_key_order([
@@ -1869,7 +1882,7 @@ class Database:
 
                     previous_state = await conn.fetchrow(
                         """
-                        SELECT verified_answer_keys, incorrect_answer_keys, is_correct
+                        SELECT selected_answer_keys, verified_answer_keys, incorrect_answer_keys, is_correct
                         FROM openedu_v2_participant_question_state
                         WHERE test_key = $1 AND participant_key = $2 AND question_key = $3
                         """,
@@ -1877,6 +1890,7 @@ class Database:
                         participant_key,
                         question_key,
                     )
+                    prev_selected = set(previous_state['selected_answer_keys'] or []) if previous_state else set()
                     prev_verified = set(previous_state['verified_answer_keys'] or []) if previous_state else set()
                     prev_incorrect = set(previous_state['incorrect_answer_keys'] or []) if previous_state else set()
                     prev_correct = bool(previous_state['is_correct']) if previous_state else False
@@ -1927,10 +1941,15 @@ class Database:
                         completed_delta,
                     )
 
+                    selected_increment_keys = selected_keys - prev_selected
+                    verified_increment_keys = current_verified - prev_verified
+                    incorrect_increment_keys = current_incorrect - prev_incorrect
+                    stored_selected_key_list = merge_key_order(selected_key_list, list(previous_state['selected_answer_keys'] or []) if previous_state else [])
+
                     for entry in raw_answer_entries:
-                        selected_inc = 1 if entry['answer_key'] in selected_keys else 0
-                        verified_inc = 1 if entry['answer_key'] in current_verified else 0
-                        incorrect_inc = 1 if entry['answer_key'] in current_incorrect else 0
+                        selected_inc = 1 if entry['answer_key'] in selected_increment_keys else 0
+                        verified_inc = 1 if entry['answer_key'] in verified_increment_keys else 0
+                        incorrect_inc = 1 if entry['answer_key'] in incorrect_increment_keys else 0
                         if selected_inc == 0 and verified_inc == 0 and incorrect_inc == 0:
                             continue
                         await conn.execute(
@@ -1986,7 +2005,7 @@ class Database:
                         participant_key,
                         question_key,
                         user_id,
-                        selected_key_list,
+                        stored_selected_key_list,
                         verified_key_list,
                         incorrect_key_list,
                         question_correct,

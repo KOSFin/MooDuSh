@@ -7111,15 +7111,17 @@
                 const context = getCourseContext();
                 const normalizedQuestions = questions.map((question) => ({
                     questionKey: String(question.questionKey || ''),
+                    questionFingerprint: String(question.questionFingerprint || ''),
                     correct: Boolean(question.correct),
                     verified: Boolean(question.hasVerifiedAnswer),
                     answers: (Array.isArray(question.options) ? question.options : [])
+                        .filter((option) => Boolean(option.selected) || Boolean(option.correct) || Boolean(option.incorrect))
                         .map((option) => ({
                             answerKey: String(option.answerKey || ''),
+                            answerFingerprint: hash(sanitizeAnswerText(option.answerText) || option.answerKey),
                             selected: Boolean(option.selected),
                             correct: Boolean(option.correct),
                             incorrect: Boolean(option.incorrect),
-                            answerText: String(option.answerText || ''),
                             inputType: String(option.inputType || '')
                         }))
                         .sort((a, b) => {
@@ -7127,7 +7129,7 @@
                             if (keyCmp !== 0) {
                                 return keyCmp;
                             }
-                            return a.answerText.localeCompare(b.answerText);
+                            return a.answerFingerprint.localeCompare(b.answerFingerprint);
                         })
                 })).sort((a, b) => a.questionKey.localeCompare(b.questionKey));
 

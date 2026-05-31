@@ -284,6 +284,11 @@
             const descendantMatch = Array.from(node.querySelectorAll('[data-tree-node], [data-question-card]'))
                 .some((child) => child !== node && !child.classList.contains('is-hidden'));
             const visible = ownMatch || descendantMatch;
+            if (ownMatch) {
+                node.querySelectorAll('[data-tree-node], [data-question-card]').forEach((child) => {
+                    child.classList.remove('is-hidden');
+                });
+            }
             node.classList.toggle('is-hidden', !visible);
             if (visible) node.open = true;
         });
