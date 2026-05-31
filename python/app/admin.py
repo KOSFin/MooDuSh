@@ -71,6 +71,13 @@ def _require_admin_or_login(request: Request):
     raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={'Location': '/admin/login'})
 
 
+def _safe_admin_redirect(value: str, fallback: str = '/admin') -> str:
+    value = str(value or '').strip()
+    if value.startswith('/admin') and not value.startswith('//') and '\n' not in value and '\r' not in value:
+        return value
+    return fallback
+
+
 # ── Login / Logout ─────────────────────────────────────────────────
 
 @admin_router.get('/admin/login', response_class=HTMLResponse)
@@ -232,6 +239,22 @@ async def admin_questions(request: Request, page: int = 1, q: str = ''):
             search_url=quote_plus(q),
         ),
     )
+
+
+@admin_router.post('/admin/questions/delete')
+@admin_router.post('/api/admin/questions/delete')
+async def admin_question_delete(
+    request: Request,
+    test_key: str = Form(...),
+    question_key: str = Form(...),
+    return_to: str = Form('/admin/questions'),
+    csrf_token: str = Form(..., alias=ADMIN_CSRF_FIELD),
+):
+    _require_admin_or_login(request)
+    verify_admin_csrf(request, csrf_token)
+    await database.delete_admin_question(test_key, question_key)
+    fallback = f'/admin/tests/{quote(test_key, safe="")}' if test_key else '/admin/questions'
+    return RedirectResponse(url=_safe_admin_redirect(return_to, fallback), status_code=303)
 
 
 # ── OpenEdu V2 course hierarchy ───────────────────────────────────

@@ -25,119 +25,158 @@
     <article class="card"><p>Карантин</p><h3>{{ data.counters.parse_reports }}</h3></article>
 </section>
 
-<section class="panel">
-    <div class="panel-head"><h2>Версии расширения / parser</h2></div>
-    <table>
-        <thead><tr><th>Extension</th><th>Parser</th><th>Build</th><th>Вопросы</th><th>Confidence</th></tr></thead>
-        <tbody>
-        {% for row in data.version_stats %}
-            <tr>
-                <td>{{ row.extension_version }}</td>
-                <td>{{ row.parser_version }}</td>
-                <td class="cell-wrap">{{ row.build_id[:12] if row.build_id else 'unknown' }}</td>
-                <td>{{ row.question_count }}</td>
-                <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
-            </tr>
-        {% else %}
-            <tr><td colspan="5" class="empty">Версий пока нет.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-</section>
+<div class="grid-2">
+    <section class="panel">
+        <div class="panel-head"><h2>Версии расширения / parser</h2></div>
+        <table>
+            <thead><tr><th>Extension</th><th>Parser</th><th>Build</th><th>Вопросы</th><th>Confidence</th></tr></thead>
+            <tbody>
+            {% for row in data.version_stats %}
+                <tr>
+                    <td>{{ row.extension_version }}</td>
+                    <td>{{ row.parser_version }}</td>
+                    <td class="cell-wrap">{{ row.build_id[:12] if row.build_id else 'unknown' }}</td>
+                    <td>{{ row.question_count }}</td>
+                    <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" class="empty">Версий пока нет.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
 
-<section class="panel">
-    <div class="panel-head"><h2>Типы вопросов</h2></div>
-    <table>
-        <thead><tr><th>Тип</th><th>Вопросы</th><th>Low conf</th><th>Confidence</th></tr></thead>
-        <tbody>
-        {% for row in data.type_stats %}
-            <tr>
-                <td><span class="badge badge-gray">{{ row.question_type }}</span></td>
-                <td>{{ row.question_count }}</td>
-                <td>{{ row.low_confidence_count }}</td>
-                <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
-            </tr>
-        {% else %}
-            <tr><td colspan="4" class="empty">Типов пока нет.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-</section>
+    <section class="panel">
+        <div class="panel-head"><h2>Типы вопросов</h2></div>
+        <table>
+            <thead><tr><th>Тип</th><th>Вопросы</th><th>Low conf</th><th>Confidence</th></tr></thead>
+            <tbody>
+            {% for row in data.type_stats %}
+                <tr>
+                    <td><span class="badge badge-gray">{{ row.question_type }}</span></td>
+                    <td>{{ row.question_count }}</td>
+                    <td>{{ row.low_confidence_count }}</td>
+                    <td>{{ "%.2f"|format(row.avg_confidence or 0) }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="4" class="empty">Типов пока нет.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
 
-<section class="panel">
-    <div class="panel-head"><h2>Дерево курса: раздел → sequence → vertical</h2></div>
-    <div class="tree">
+<section class="panel" id="course-tree-panel">
+    <div class="panel-head">
+        <h2>Дерево курса</h2>
+        <span class="text-muted">Разделы, sequence, vertical и последние 300 вопросов</span>
+    </div>
+    <div class="tree-toolbar" data-tree-controls="course-tree">
+        <input class="tree-search" type="search" placeholder="Фильтр по названию, id, вопросу или ответу" data-tree-search="course-tree" aria-label="Фильтр дерева курса">
+        <button type="button" class="btn btn-secondary btn-small" data-tree-action="expand">Раскрыть все</button>
+        <button type="button" class="btn btn-secondary btn-small" data-tree-action="collapse">Скрыть все</button>
+    </div>
+    <div class="tree" id="course-tree">
         {% for ch in data.chapters %}
-            <article class="tree-chapter">
-                <div class="tree-chapter-head">
-                    <div>
-                        <div class="tree-title">{{ ch.title or ch.chapter_id }}</div>
-                        <div class="tree-meta">{{ ch.chapter_id }}</div>
-                    </div>
-                    <div class="answer-stats">
-                        <span class="badge badge-gray">{{ ch.sequential_count }} seq</span>
+            <details class="tree-node tree-node-level-1" data-tree-node open>
+                <summary>
+                    <span class="tree-summary-main">
+                        <span class="tree-title">{{ ch.title or ch.chapter_id }}</span>
+                        <span class="tree-meta">{{ ch.chapter_id }}</span>
+                    </span>
+                    <span class="tree-summary-stats">
+                        <span class="badge badge-blue">{{ ch.sequential_count }} seq</span>
                         <span class="badge badge-gray">{{ ch.vertical_count }} vertical</span>
                         <span class="badge badge-green">{{ ch.question_count }} questions</span>
-                    </div>
-                </div>
-                <div class="tree-body">
+                    </span>
+                </summary>
+                <div class="tree-content">
                     {% for seq in ch.sequentials %}
-                        <div class="tree-seq">
-                            <div>
-                                <div class="tree-title">{{ seq.title or seq.sequential_id }}</div>
-                                <div class="tree-meta">{{ seq.sequential_id }}</div>
-                            </div>
-                            {% for v in seq.verticals %}
-                                <div class="tree-vertical">
-                                    <div class="tree-vertical-main">
-                                        <div class="tree-title">{{ v.title or v.vertical_id }}</div>
-                                        <div class="tree-meta">{{ v.vertical_id }}</div>
-                                    </div>
-                                    <span class="badge badge-gray">{{ v.test_count }} tests</span>
-                                    <span class="badge badge-green">{{ v.question_count }} questions</span>
-                                    <div class="vertical-questions">
-                                        {% for q in v.questions %}
-                                            <article class="compact-question">
-                                                <div class="question-prompt">{{ q.prompt or q.question_key }}</div>
-                                                <div class="question-meta">
-                                                    <span>{{ q.question_type }}</span>
-                                                    <span>confidence {{ "%.2f"|format(q.parse_confidence or 0) }}</span>
-                                                    <span>ext {{ q.extension_version or 'unknown' }}</span>
-                                                    <span>parser {{ q.parser_version or 'unknown' }}</span>
-                                                    <span>build {{ q.build_id[:12] if q.build_id else 'unknown' }}</span>
-                                                </div>
-                                                <div class="answer-list">
-                                                    {% for a in q.answers %}
-                                                        <div class="answer-item">
-                                                            <div class="answer-text">{{ a.answer_text or a.answer_key }}</div>
-                                                            <div class="answer-stats">
-                                                                <span class="badge badge-green">ok {{ a.verified_count }}</span>
-                                                                <span class="badge badge-amber">fallback {{ a.fallback_count }}</span>
-                                                                <span class="badge badge-gray">bad {{ a.incorrect_count }}</span>
+                        <details class="tree-node tree-node-level-2" data-tree-node>
+                            <summary>
+                                <span class="tree-summary-main">
+                                    <span class="tree-title">{{ seq.title or seq.sequential_id }}</span>
+                                    <span class="tree-meta">{{ seq.sequential_id }}</span>
+                                </span>
+                                <span class="tree-summary-stats">
+                                    <span class="badge badge-gray">{{ seq.vertical_count }} vertical</span>
+                                    <span class="badge badge-green">{{ seq.question_count }} questions</span>
+                                </span>
+                            </summary>
+                            <div class="tree-content">
+                                {% for v in seq.verticals %}
+                                    <details class="tree-node tree-node-level-3" data-tree-node>
+                                        <summary>
+                                            <span class="tree-summary-main">
+                                                <span class="tree-title">{{ v.title or v.vertical_id }}</span>
+                                                <span class="tree-meta">{{ v.vertical_id }}</span>
+                                            </span>
+                                            <span class="tree-summary-stats">
+                                                <span class="badge badge-gray">{{ v.test_count }} tests</span>
+                                                <span class="badge badge-green">{{ v.question_count }} questions</span>
+                                            </span>
+                                        </summary>
+                                        <div class="tree-content vertical-questions">
+                                            {% for q in v.questions %}
+                                                <article class="compact-question" data-question-card>
+                                                    <div class="compact-question-head">
+                                                        <div class="question-prompt">{{ q.prompt or q.question_key }}</div>
+                                                        <form method="post" action="/admin/v2/questions/delete" class="inline-form" onsubmit="return confirm('Удалить этот вопрос V2 вместе с ответами и состоянием участников?');">
+                                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                            <input type="hidden" name="course_id" value="{{ data.course.course_id }}">
+                                                            <input type="hidden" name="test_key" value="{{ q.test_key }}">
+                                                            <input type="hidden" name="question_key" value="{{ q.question_key }}">
+                                                            <button type="submit" class="btn btn-danger btn-small">Удалить</button>
+                                                        </form>
+                                                    </div>
+                                                    <div class="question-meta">
+                                                        <span>{{ q.question_type }}</span>
+                                                        <span>{{ q.question_key }}</span>
+                                                        <span>confidence {{ "%.2f"|format(q.parse_confidence or 0) }}</span>
+                                                        <span>ext {{ q.extension_version or 'unknown' }}</span>
+                                                        <span>parser {{ q.parser_version or 'unknown' }}</span>
+                                                        <span>build {{ q.build_id[:12] if q.build_id else 'unknown' }}</span>
+                                                    </div>
+                                                    <div class="metric-grid">
+                                                        <div class="metric"><span>Ответов</span><strong>{{ q.answer_count }}</strong></div>
+                                                        <div class="metric"><span>Верно</span><strong>{{ q.verified_count }}</strong></div>
+                                                        <div class="metric"><span>Fallback</span><strong>{{ q.fallback_count }}</strong></div>
+                                                        <div class="metric"><span>Bad</span><strong>{{ q.incorrect_count }}</strong></div>
+                                                    </div>
+                                                    <div class="answer-list">
+                                                        {% for a in q.answers %}
+                                                            <div class="answer-item">
+                                                                <div class="answer-text">{{ a.answer_text or a.answer_key }}</div>
+                                                                <div class="answer-stats">
+                                                                    <span class="badge badge-green">ok {{ a.verified_count }}</span>
+                                                                    <span class="badge badge-amber">fallback {{ a.fallback_count }}</span>
+                                                                    <span class="badge badge-gray">bad {{ a.incorrect_count }}</span>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    {% else %}
-                                                        <div class="text-muted">Ответы пока не записаны или вопрос в карантине.</div>
-                                                    {% endfor %}
-                                                </div>
-                                            </article>
-                                        {% else %}
-                                            <div class="text-muted">Вопросы для этого vertical пока не записаны.</div>
-                                        {% endfor %}
-                                    </div>
-                                </div>
-                            {% else %}
-                                <div class="empty">Vertical внутри sequence пока нет.</div>
-                            {% endfor %}
-                        </div>
+                                                        {% else %}
+                                                            <div class="text-muted">Ответы пока не записаны или вопрос в карантине.</div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </article>
+                                            {% else %}
+                                                <div class="empty">Вопросы для этого vertical пока не записаны.</div>
+                                            {% endfor %}
+                                        </div>
+                                    </details>
+                                {% else %}
+                                    <div class="empty">Vertical внутри sequence пока нет.</div>
+                                {% endfor %}
+                            </div>
+                        </details>
                     {% else %}
                         <div class="empty">Sequence внутри раздела пока нет.</div>
                     {% endfor %}
                 </div>
-            </article>
+            </details>
         {% else %}
             <div class="empty">Структура курса пока не записана.</div>
         {% endfor %}
+        <div class="empty is-hidden" data-tree-empty>По фильтру ничего не найдено.</div>
     </div>
 </section>
 
@@ -211,4 +250,57 @@
         </tbody>
     </table>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+    const tree = document.getElementById('course-tree');
+    if (!tree) return;
+
+    const nodes = () => Array.from(tree.querySelectorAll('[data-tree-node]'));
+    const questionCards = () => Array.from(tree.querySelectorAll('[data-question-card]'));
+    const emptyState = tree.querySelector('[data-tree-empty]');
+    const search = document.querySelector('[data-tree-search="course-tree"]');
+    const controls = document.querySelector('[data-tree-controls="course-tree"]');
+
+    const normalize = (value) => (value || '').toLocaleLowerCase('ru-RU').trim();
+    const ownSummaryText = (node) => normalize(node.querySelector('summary')?.textContent);
+
+    const applyFilter = () => {
+        const needle = normalize(search?.value);
+
+        questionCards().forEach((card) => {
+            card.classList.toggle('is-hidden', Boolean(needle) && !normalize(card.textContent).includes(needle));
+        });
+
+        nodes().reverse().forEach((node) => {
+            if (!needle) {
+                node.classList.remove('is-hidden');
+                return;
+            }
+
+            const ownMatch = ownSummaryText(node).includes(needle);
+            const descendantMatch = Array.from(node.querySelectorAll('[data-tree-node], [data-question-card]'))
+                .some((child) => child !== node && !child.classList.contains('is-hidden'));
+            const visible = ownMatch || descendantMatch;
+            node.classList.toggle('is-hidden', !visible);
+            if (visible) node.open = true;
+        });
+
+        const hasVisibleNode = nodes().some((node) => !node.classList.contains('is-hidden'));
+        if (emptyState) emptyState.classList.toggle('is-hidden', hasVisibleNode || !needle);
+    };
+
+    search?.addEventListener('input', applyFilter);
+    controls?.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-tree-action]');
+        if (!button) return;
+        const shouldOpen = button.dataset.treeAction === 'expand';
+        nodes().forEach((node) => {
+            if (!node.classList.contains('is-hidden')) node.open = shouldOpen;
+        });
+    });
+})();
+</script>
 {% endblock %}

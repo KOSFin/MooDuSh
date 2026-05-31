@@ -3337,5 +3337,29 @@ class Database:
 
         return {'total': total, 'questions': [dict(r) for r in rows], 'search': search.strip()}
 
+    async def delete_admin_question(self, test_key: str, question_key: str) -> dict[str, int]:
+        assert self.pool is not None
+        test_key = str(test_key or '').strip()
+        question_key = str(question_key or '').strip()
+        if not test_key or not question_key:
+            return {}
+
+        deleted: dict[str, int] = {}
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                deleted['participant_state'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_participant_question_state WHERE test_key = $1 AND question_key = $2",
+                    test_key, question_key,
+                ))
+                deleted['answers'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_answer_stats WHERE test_key = $1 AND question_key = $2",
+                    test_key, question_key,
+                ))
+                deleted['questions'] = self._command_count(await conn.execute(
+                    "DELETE FROM openedu_questions WHERE test_key = $1 AND question_key = $2",
+                    test_key, question_key,
+                ))
+        return deleted
+
 
 database = Database()

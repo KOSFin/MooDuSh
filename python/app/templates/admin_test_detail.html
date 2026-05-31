@@ -33,6 +33,13 @@
                     <div class="metric"><span>Подтв.</span><strong>{{ q.verified_count }}</strong></div>
                     <div class="metric"><span>Неверн.</span><strong>{{ q.incorrect_count }}</strong></div>
                     <div class="metric"><span>Выборов</span><strong>{{ q.fallback_count }}</strong></div>
+                    <form method="post" action="/admin/questions/delete" class="metric-action" onsubmit="return confirm('Удалить этот вопрос вместе с ответами и состоянием участников?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="test_key" value="{{ q.test_key }}">
+                        <input type="hidden" name="question_key" value="{{ q.question_key }}">
+                        <input type="hidden" name="return_to" value="/admin/tests/{{ data.test.test_key }}?page={{ page }}">
+                        <button type="submit" class="btn btn-danger btn-small">Удалить</button>
+                    </form>
                 </div>
             </article>
         {% else %}
