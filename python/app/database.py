@@ -657,6 +657,7 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_openedu_v2_answers_norm ON openedu_v2_answers (test_key, question_key, answer_norm) WHERE answer_norm != '';
                 CREATE INDEX IF NOT EXISTS idx_openedu_v2_attempts_test ON openedu_v2_attempts (test_key, created_at DESC);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_openedu_v2_attempts_fingerprint ON openedu_v2_attempts (fingerprint) WHERE fingerprint != '';
+                CREATE INDEX IF NOT EXISTS idx_openedu_v2_courses_updated ON openedu_v2_courses (updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_client_logs_user_created ON client_logs (user_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_client_logs_kind_created ON client_logs (kind, created_at DESC);
                 """
@@ -2591,58 +2592,70 @@ class Database:
         search_clean = search.strip()
         needle = '%' + search_clean + '%' if search_clean else ''
         async with self.pool.acquire() as conn:
-            if needle:
-                total = await conn.fetchval(
-                    """
-                    SELECT COUNT(*)
-                    FROM openedu_v2_courses
-                    WHERE course_id ILIKE $1 OR title ILIKE $1 OR host ILIKE $1
-                    """,
-                    needle,
-                )
-                rows = await conn.fetch(
-                    """
-                    SELECT c.course_id, c.host, c.title, c.updated_at,
-                           COUNT(DISTINCT ch.chapter_id) AS chapter_count,
-                           COUNT(DISTINCT s.sequential_id) AS sequential_count,
-                           COUNT(DISTINCT v.vertical_id) AS vertical_count,
-                           COUNT(DISTINCT q.question_key) AS question_count,
-                           COUNT(DISTINCT a.id) AS attempt_count
+            total = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM openedu_v2_courses
+                WHERE $1::text = '' OR course_id ILIKE $1 OR title ILIKE $1 OR host ILIKE $1
+                """,
+                needle,
+            )
+            rows = await conn.fetch(
+                """
+                WITH page_courses AS (
+                    SELECT c.course_id, c.host, c.title, c.updated_at
                     FROM openedu_v2_courses c
-                    LEFT JOIN openedu_v2_chapters ch ON ch.course_id = c.course_id
-                    LEFT JOIN openedu_v2_sequentials s ON s.course_id = c.course_id
-                    LEFT JOIN openedu_v2_verticals v ON v.course_id = c.course_id
-                    LEFT JOIN openedu_v2_questions q ON q.course_id = c.course_id
-                    LEFT JOIN openedu_v2_attempts a ON a.test_key IN (SELECT test_key FROM openedu_v2_tests WHERE course_id = c.course_id)
-                    WHERE c.course_id ILIKE $3 OR c.title ILIKE $3 OR c.host ILIKE $3
-                    GROUP BY c.course_id, c.host, c.title, c.updated_at
+                    WHERE $3::text = '' OR c.course_id ILIKE $3 OR c.title ILIKE $3 OR c.host ILIKE $3
                     ORDER BY c.updated_at DESC
                     LIMIT $1 OFFSET $2
-                    """,
-                    limit, offset, needle,
+                ),
+                chapter_counts AS (
+                    SELECT ch.course_id, COUNT(*) AS chapter_count
+                    FROM openedu_v2_chapters ch
+                    JOIN page_courses p ON p.course_id = ch.course_id
+                    GROUP BY ch.course_id
+                ),
+                sequential_counts AS (
+                    SELECT s.course_id, COUNT(*) AS sequential_count
+                    FROM openedu_v2_sequentials s
+                    JOIN page_courses p ON p.course_id = s.course_id
+                    GROUP BY s.course_id
+                ),
+                vertical_counts AS (
+                    SELECT v.course_id, COUNT(*) AS vertical_count
+                    FROM openedu_v2_verticals v
+                    JOIN page_courses p ON p.course_id = v.course_id
+                    GROUP BY v.course_id
+                ),
+                question_counts AS (
+                    SELECT q.course_id, COUNT(*) AS question_count
+                    FROM openedu_v2_questions q
+                    JOIN page_courses p ON p.course_id = q.course_id
+                    GROUP BY q.course_id
+                ),
+                attempt_counts AS (
+                    SELECT t.course_id, COUNT(a.id) AS attempt_count
+                    FROM openedu_v2_tests t
+                    JOIN page_courses p ON p.course_id = t.course_id
+                    JOIN openedu_v2_attempts a ON a.test_key = t.test_key
+                    GROUP BY t.course_id
                 )
-            else:
-                total = await conn.fetchval("SELECT COUNT(*) FROM openedu_v2_courses")
-                rows = await conn.fetch(
-                    """
-                    SELECT c.course_id, c.host, c.title, c.updated_at,
-                           COUNT(DISTINCT ch.chapter_id) AS chapter_count,
-                           COUNT(DISTINCT s.sequential_id) AS sequential_count,
-                           COUNT(DISTINCT v.vertical_id) AS vertical_count,
-                           COUNT(DISTINCT q.question_key) AS question_count,
-                           COUNT(DISTINCT a.id) AS attempt_count
-                    FROM openedu_v2_courses c
-                    LEFT JOIN openedu_v2_chapters ch ON ch.course_id = c.course_id
-                    LEFT JOIN openedu_v2_sequentials s ON s.course_id = c.course_id
-                    LEFT JOIN openedu_v2_verticals v ON v.course_id = c.course_id
-                    LEFT JOIN openedu_v2_questions q ON q.course_id = c.course_id
-                    LEFT JOIN openedu_v2_attempts a ON a.test_key IN (SELECT test_key FROM openedu_v2_tests WHERE course_id = c.course_id)
-                    GROUP BY c.course_id, c.host, c.title, c.updated_at
-                    ORDER BY c.updated_at DESC
-                    LIMIT $1 OFFSET $2
-                    """,
-                    limit, offset,
-                )
+                SELECT p.course_id, p.host, p.title, p.updated_at,
+                       COALESCE(ch.chapter_count, 0) AS chapter_count,
+                       COALESCE(s.sequential_count, 0) AS sequential_count,
+                       COALESCE(v.vertical_count, 0) AS vertical_count,
+                       COALESCE(q.question_count, 0) AS question_count,
+                       COALESCE(a.attempt_count, 0) AS attempt_count
+                FROM page_courses p
+                LEFT JOIN chapter_counts ch ON ch.course_id = p.course_id
+                LEFT JOIN sequential_counts s ON s.course_id = p.course_id
+                LEFT JOIN vertical_counts v ON v.course_id = p.course_id
+                LEFT JOIN question_counts q ON q.course_id = p.course_id
+                LEFT JOIN attempt_counts a ON a.course_id = p.course_id
+                ORDER BY p.updated_at DESC
+                """,
+                limit, offset, needle,
+            )
 
             if needle:
                 unmapped_exists = await conn.fetchval(
