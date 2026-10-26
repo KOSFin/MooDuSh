@@ -1,0 +1,236 @@
+{
+  "answers": [
+    {
+      "index": 1,
+      "questionKey": "Q1",
+      "answers": [
+        {
+          "answerKey": "match:id_iZTpCzKR:id_fbYzSayN",
+          "answerText": "1: взаимовлияние эмоций и логики внутри человека"
+        },
+        {
+          "answerKey": "match:id_o52b6E0u:id_nzb98C6m",
+          "answerText": "2: процесс осознания своих эмоций"
+        },
+        {
+          "answerKey": "match:id_nCrbWFJk:id_90htPO8x",
+          "answerText": "3: взаимодействие на уровне логики: слова, аргументы"
+        },
+        {
+          "answerKey": "match:id_ZOsI9WCG:id_coVykFNL",
+          "answerText": "4: взаимовлияние на уровне логики: высказывания одного из собеседников влияют на аргументы и точку зрения другого"
+        },
+        {
+          "answerKey": "match:id_xAET7wBb:id_cQ6IwjC2",
+          "answerText": "5: взаимовлияние на уровне эмоций"
+        },
+        {
+          "answerKey": "match:id_VGZnD28z:id_qH5aTUXO",
+          "answerText": "6: осознание эмоций другого"
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "questionKey": "Q2",
+      "answers": [
+        {
+          "answerKey": "match:id_iZTpCzKR:id_fbYzSayN",
+          "answerText": "Индекс межличностной реактивности: Марк Дэвис"
+        },
+        {
+          "answerKey": "match:id_o52b6E0u:id_nzb98C6m",
+          "answerText": "Индекс межличностной реактивности: 1983"
+        },
+        {
+          "answerKey": "match:id_nCrbWFJk:id_90htPO8x",
+          "answerText": "Опросник эмоциональной эмпатии: Альберт Мехрабиан и Норман Эпстайн"
+        },
+        {
+          "answerKey": "match:id_ZOsI9WCG:id_coVykFNL",
+          "answerText": "Опросник эмоциональной эмпатии: 1972"
+        },
+        {
+          "answerKey": "match:id_xAET7wBb:id_cQ6IwjC2",
+          "answerText": "Уровень сопереживания: Барон-Кохен и Салли Уилрайт"
+        },
+        {
+          "answerKey": "match:id_VGZnD28z:id_qH5aTUXO",
+          "answerText": "Уровень сопереживания: 2004"
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "questionKey": "Q3",
+      "answers": []
+    },
+    {
+      "index": 4,
+      "questionKey": "Q4",
+      "answers": []
+    },
+    {
+      "index": 5,
+      "questionKey": "Q5",
+      "answers": [
+        {
+          "answerKey": "эмпатическое высказывание",
+          "answerText": "эмпатическое высказывание"
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "questionKey": "Q6",
+      "answers": [
+        {
+          "answerKey": "невербальная",
+          "answerText": "невербальная"
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "questionKey": "Q7",
+      "answers": [
+        {
+          "answerKey": "Джакомо Риззолатти, 1996",
+          "answerText": "Джакомо Риззолатти, 1996"
+        }
+      ]
+    },
+    {
+      "index": 8,
+      "questionKey": "Q8",
+      "answers": [
+        {
+          "answerKey": "658585284",
+          "answerText": "ритуал очищения"
+        }
+      ]
+    },
+    {
+      "index": 9,
+      "questionKey": "Q9",
+      "answers": [
+        {
+          "answerKey": "1351201587",
+          "answerText": "сначала на эмоциональный, потом на логический"
+        }
+      ]
+    },
+    {
+      "index": 10,
+      "questionKey": "Q10",
+      "answers": []
+    },
+    {
+      "index": 11,
+      "questionKey": "Q11",
+      "answers": [
+        {
+          "answerKey": "вербальном",
+          "answerText": "вербальном"
+        }
+      ]
+    },
+    {
+      "index": 12,
+      "questionKey": "Q12",
+      "answers": [
+        {
+          "answerKey": "1054195959",
+          "answerText": "да, это один из ключевых аспектов эмпатии"
+        }
+      ]
+    },
+    {
+      "index": 13,
+      "questionKey": "Q13",
+      "answers": [
+        {
+          "answerKey": "зеркальные нейроны",
+          "answerText": "зеркальные нейроны"
+        }
+      ]
+    },
+    {
+      "index": 14,
+      "questionKey": "Q14",
+      "answers": [
+        {
+          "answerKey": "1178325853",
+          "answerText": "вы сможете отделить собственные эмоции от тех, которые вам были навязаны другими людьми"
+        },
+        {
+          "answerKey": "14676278",
+          "answerText": "вы сможете управлять теми эмоциями, которые смогли определить в себе"
+        }
+      ]
+    },
+    {
+      "index": 15,
+      "questionKey": "Q15",
+      "answers": [
+        {
+          "answerKey": "вербальная",
+          "answerText": "вербальная"
+        }
+      ]
+    },
+    {
+      "index": 16,
+      "questionKey": "Q16",
+      "answers": [
+        {
+          "answerKey": "невербальная",
+          "answerText": "невербальная"
+        }
+      ]
+    },
+    {
+      "index": 17,
+      "questionKey": "Q17",
+      "answers": [
+        {
+          "answerKey": "паралингвистическая",
+          "answerText": "паралингвистическая"
+        }
+      ]
+    },
+    {
+      "index": 18,
+      "questionKey": "Q18",
+      "answers": [
+        {
+          "answerKey": "вербальная",
+          "answerText": "вербальная"
+        }
+      ]
+    },
+    {
+      "index": 19,
+      "questionKey": "Q19",
+      "answers": [
+        {
+          "answerKey": "1709929764",
+          "answerText": "описание ситуации и задавание вопроса об ощущениях как о следствии ситуации"
+        },
+        {
+          "answerKey": "433706386",
+          "answerText": "высказывание предположения о чувствах и эмоциях собеседника"
+        },
+        {
+          "answerKey": "1090403830",
+          "answerText": "высказывание предположения о причине эмоций собеседника"
+        }
+      ]
+    },
+    {
+      "index": 20,
+      "questionKey": "Q20",
+      "answers": []
+    }
+  ]
+}

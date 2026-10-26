@@ -504,8 +504,7 @@
     display: none;
 }
 
-.moodush-openedu-inline-menu:hover .moodush-openedu-inline-popover,
-.moodush-openedu-inline-menu:focus-within .moodush-openedu-inline-popover {
+.moodush-openedu-inline-menu.is-open > .moodush-openedu-inline-popover {
     display: block;
 }
 
@@ -685,4 +684,8 @@
 .moodush-openedu-hide-wands .moodush-openedu-highlight {
     animation: none !important;
     outline: none !important;
+}
+
+.moodush-openedu-inline-popover[hidden] {
+    display: none !important;
 }

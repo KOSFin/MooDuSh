@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MooDuSh — Напоминания</title>
+    <link rel="stylesheet" href="../css/reminders.css">
+    <script src="../js/reminders_page.js" defer></script>
+</head>
+<body>
+    <main>
+        <header><span class="brand">MooDuSh <span class="tag">OpenEdu</span></span><span id="count" aria-live="polite"></span></header>
+        <section class="intro">
+            <p class="eyebrow">Вернуться и выполнить</p>
+            <h1>Напоминания</h1>
+            <p>Задания, которые нужно выполнить вручную: игры, тренажёры и другие интерактивные упражнения.</p>
+        </section>
+        <p id="status" role="status" aria-live="polite">Загрузка…</p>
+        <ol id="reminders" aria-label="Задания для ручного выполнения"></ol>
+        <section id="empty" hidden><h2>Пока всё спокойно</h2><p>Когда MooDuSh встретит неподдерживаемое задание, ссылка появится здесь автоматически.</p></section>
+        <footer>Ссылки сохраняются в этом браузере. Можно закрыть вкладку и открыть её снова из меню MooDuSh.</footer>
+    </main>
+</body>
+</html>

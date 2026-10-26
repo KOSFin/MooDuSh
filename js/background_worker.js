@@ -37,7 +37,9 @@ function installPrivacyPolicyTabsGuard() {
     chrome.tabs.create = (createProperties, callback) => {
         const url = createProperties && typeof createProperties === 'object' ? createProperties.url : '';
         if (!isPrivacyPolicyUrl(url)) {
-            return nativeTabsCreate(createProperties, callback);
+            return typeof callback === 'function'
+                ? nativeTabsCreate(createProperties, callback)
+                : nativeTabsCreate(createProperties);
         }
 
         openPrivacyPolicyTabGuarded(url, callback);
@@ -84,7 +86,7 @@ function openPrivacyPolicyTabGuarded(url, callback) {
 }
 
 installPrivacyPolicyTabsGuard();
-importScripts('background.js');
+importScripts('background.js', 'ai_background.js', 'reminders_background.js');
 
 const PARAMEXT_SETTINGS_KEY = 'paramExtPlatformSettingsV2';
 const PARAMEXT_LEGACY_SETTINGS_KEY = 'paramExtSettings';

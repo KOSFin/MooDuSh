@@ -12,6 +12,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.ParamExtTelemetry.installGlobalHandlers('popup');
     }
 
+    $('openRemindersBtn').addEventListener('click', async () => {
+        await chrome.runtime.sendMessage({ type: 'MOODUSH_OPEN_REMINDERS' });
+        window.close();
+    });
+
     const refs = {
         mainLogo: $('mainLogo'),
         headerStatus: $('headerStatus'),
@@ -66,6 +71,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         openeduAutoUseFallbackAnswers: $('openeduAutoUseFallbackAnswers'),
         openeduAutoCheckAnswers: $('openeduAutoCheckAnswers'),
         openeduMissingAnswerAction: $('openeduMissingAnswerAction'),
+        openeduUnsupportedTaskAction: $('openeduUnsupportedTaskAction'),
+        openeduChatgptAnswerTimeoutMinutes: $('openeduChatgptAnswerTimeoutMinutes'),
         openeduAutoAdvanceDelayMs: $('openeduAutoAdvanceDelayMs'),
         openeduDebugOverlay: $('openeduDebugOverlay'),
         statsRefreshBtn: $('statsRefreshBtn'),
@@ -240,6 +247,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         refs.openeduAutoUseFallbackAnswers.checked = settings.openedu.autoUseFallbackAnswers;
         refs.openeduAutoCheckAnswers.checked = settings.openedu.autoCheckAnswers;
         refs.openeduMissingAnswerAction.value = settings.openedu.missingAnswerAction;
+        refs.openeduUnsupportedTaskAction.value = settings.openedu.unsupportedTaskAction;
+        refs.openeduChatgptAnswerTimeoutMinutes.value = String(settings.openedu.chatgptAnswerTimeoutMinutes);
         refs.openeduAutoAdvanceDelayMs.value = String(settings.openedu.autoAdvanceDelayMs);
         refs.openeduDebugOverlay.checked = Boolean(settings.diagnostics?.openeduDebugOverlay);
         const moodleOnly = isMoodleOnlyMode();
@@ -295,6 +304,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         next.openedu.autoUseFallbackAnswers = refs.openeduAutoUseFallbackAnswers.checked;
         next.openedu.autoCheckAnswers = refs.openeduAutoCheckAnswers.checked;
         next.openedu.missingAnswerAction = refs.openeduMissingAnswerAction.value;
+        next.openedu.unsupportedTaskAction = refs.openeduUnsupportedTaskAction.value;
+        next.openedu.chatgptAnswerTimeoutMinutes = Number(refs.openeduChatgptAnswerTimeoutMinutes.value || 10);
         next.openedu.autoAdvanceDelayMs = Math.max(500, Number(refs.openeduAutoAdvanceDelayMs.value || next.openedu.autoAdvanceDelayMs));
         next.diagnostics.openeduDebugOverlay = refs.openeduDebugOverlay.checked;
 
@@ -483,27 +494,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    async function refreshProjectVersion() {
-        const baseUrl = settings.backend.openedu.apiBaseUrl || defaultOpeneduUrl();
-        if (!baseUrl) {
-            return;
-        }
-
-        try {
-            const response = await fetch(baseUrl + '/v2/version', { cache: 'no-store' });
-            if (!response.ok) {
-                return;
-            }
-            const data = await response.json();
-            const projectVersion = data.projectVersion || data.latestVersion || '';
-            if (projectVersion) {
-                refs.versionPill.textContent = 'v' + projectVersion;
-            }
-        } catch (_) {
-            refs.versionPill.textContent = 'v' + (manifest.version || 'unknown');
-        }
-    }
-
     function bindHotkey(input) {
         input.addEventListener('keydown', (event) => {
             if (event.key === 'Tab') {
@@ -645,6 +635,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         refs.openeduAutoUseFallbackAnswers,
         refs.openeduAutoCheckAnswers,
         refs.openeduMissingAnswerAction,
+        refs.openeduUnsupportedTaskAction,
+        refs.openeduChatgptAnswerTimeoutMinutes,
         refs.openeduDebugOverlay
     ].forEach((control) => {
         control.addEventListener(control.tagName === 'INPUT' && control.type !== 'checkbox' ? 'input' : 'change', () => {
@@ -666,7 +658,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     applyStateToUi();
     reportStartupEvents();
-    refreshProjectVersion();
     pingBackend();
     checkUpdate();
     refreshStats();

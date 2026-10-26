@@ -51,7 +51,8 @@
                 autoUseSimilarAnswers: false,
                 autoUseFallbackAnswers: false,
                 autoCheckAnswers: false,
-                missingAnswerAction: 'stop'
+                missingAnswerAction: 'stop',
+                unsupportedTaskAction: 'solveSupported'
             },
             diagnostics: {
                 openeduDebugOverlay: false

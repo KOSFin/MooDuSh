@@ -1,0 +1,27 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #242139; background: #f6f5fa; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 940px; margin: 0 auto; padding: 40px 24px; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.brand { font-weight: 750; font-size: 21px; }
+.tag { font-size: 12px; color: #6551a2; background: #eae4fa; padding: 5px 9px; border-radius: 20px; margin-left: 8px; }
+#count, footer { font-size: 13px; color: #6b657d; }
+.intro { max-width: 640px; margin: 64px 0 32px; }
+.eyebrow { color: #7350b5; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
+h1 { margin: 12px 0; font-size: clamp(32px, 5vw, 46px); letter-spacing: -.04em; }
+p { line-height: 1.65; }
+.intro > p:last-child { color: #6b657d; font-size: 17px; }
+#reminders { padding: 0; list-style: none; display: grid; gap: 14px; }
+#reminders li { display: flex; align-items: flex-start; gap: 24px; border: 1px solid #e4dfed; padding: 24px; border-radius: 16px; background: white; }
+.task { flex: 1; min-width: 0; }
+a { color: #5d379f; text-underline-offset: 4px; }
+.task-title { font-size: 18px; font-weight: 650; }
+.task-url { display: block; font-size: 13px; color: #6b657d; margin-top: 12px; overflow-wrap: anywhere; line-height: 1.7; }
+button { border: 1px solid #ddd5eb; background: #fff; border-radius: 9px; padding: 8px 12px; color: #6b657d; cursor: pointer; }
+button:hover { color: #5d379f; background: #f5f1fb; }
+button:focus-visible, a:focus-visible { outline: 3px solid #a789dc; outline-offset: 4px; }
+#empty { border: 1px dashed #d4c9e6; padding: 32px; border-radius: 16px; color: #6b657d; }
+#empty h2 { color: #342b49; margin-top: 0; font-size: 21px; }
+#status:empty { display: none; }
+footer { margin-top: 36px; line-height: 1.7; }
+@media (max-width: 560px) { .intro { margin-top: 40px; } #reminders li { padding: 18px; gap: 12px; flex-direction: column; } }

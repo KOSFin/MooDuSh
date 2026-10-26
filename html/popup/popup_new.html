@@ -21,6 +21,7 @@
                 <a href="#" id="telegramChannelLink" class="icon-btn telegram-btn" target="_blank" rel="noopener" title="Telegram-канал MooDuSh" aria-label="Telegram-канал MooDuSh">
                     <img src="../../icons/telegram.png" alt="">
                 </a>
+                <button type="button" id="openRemindersBtn" class="icon-btn" title="Напоминания" aria-label="Открыть напоминания">☷</button>
                 <button type="button" id="openSetupBtn" class="icon-btn" title="Подключение и backend">⚙</button>
                 <div class="version-pill" id="versionPill">v...</div>
             </div>
@@ -107,12 +108,26 @@
                     <label class="check-row"><input type="checkbox" id="openeduAutoUseFallbackAnswers"><span>Использовать популярные ответы без подтверждения</span></label>
                     <label class="check-row"><input type="checkbox" id="openeduAutoCheckAnswers"><span>Нажимать «Проверить», если кнопка доступна</span></label>
                     <label class="field">
+                        <span>Если на странице есть неподдерживаемое задание</span>
+                        <select id="openeduUnsupportedTaskAction">
+                            <option value="solveSupported">Решить доступную часть</option>
+                            <option value="skipPage">Пропустить всю страницу и добавить в напоминания</option>
+                        </select>
+                        <small>Неподдерживаемые задания сохраняются в напоминаниях в обоих случаях. Переход — если включён.</small>
+                    </label>
+                    <label class="field">
                         <span>Если ответа нет</span>
                         <select id="openeduMissingAnswerAction">
                             <option value="stop">Остановиться</option>
                             <option value="alert">Показать вопрос</option>
                             <option value="advance">Перейти дальше</option>
+                            <option value="chatgpt">Спросить ChatGPT (авто-прохождение)</option>
                         </select>
+                    </label>
+                    <label class="field">
+                        <span>Тайм-аут ответа ChatGPT, мин</span>
+                        <input type="number" min="1" max="60" step="1" id="openeduChatgptAnswerTimeoutMinutes">
+                        <small>От 1 до 60 минут после отправки запроса. Для следующих запросов.</small>
                     </label>
                 </div>
                 <div id="openeduAutoOptions" class="option-block hidden">

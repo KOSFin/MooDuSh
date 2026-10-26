@@ -51,7 +51,9 @@
             autoUseSimilarAnswers: false,
             autoUseFallbackAnswers: false,
             autoCheckAnswers: false,
-            missingAnswerAction: 'stop'
+            missingAnswerAction: 'stop',
+            unsupportedTaskAction: 'solveSupported',
+            chatgptAnswerTimeoutMinutes: 10
         },
         diagnostics: {
             openeduDebugOverlay: false
@@ -151,9 +153,14 @@
             next.openedu.autoUseSimilarAnswers = Boolean(openedu.autoUseSimilarAnswers);
             next.openedu.autoUseFallbackAnswers = Boolean(openedu.autoUseFallbackAnswers);
             next.openedu.autoCheckAnswers = Boolean(openedu.autoCheckAnswers);
-            if (openedu.missingAnswerAction === 'stop' || openedu.missingAnswerAction === 'advance' || openedu.missingAnswerAction === 'alert') {
+            if (openedu.missingAnswerAction === 'stop' || openedu.missingAnswerAction === 'advance' || openedu.missingAnswerAction === 'alert' || openedu.missingAnswerAction === 'chatgpt') {
                 next.openedu.missingAnswerAction = openedu.missingAnswerAction;
             }
+            if (openedu.unsupportedTaskAction === 'skipPage') {
+                next.openedu.unsupportedTaskAction = 'skipPage';
+            }
+            next.openedu.chatgptAnswerTimeoutMinutes = Math.min(60, Math.max(1,
+                toNumberOrFallback(openedu.chatgptAnswerTimeoutMinutes, 10) || 10));
             next.openedu.autoAdvanceDelayMs = Math.max(500, toNumberOrFallback(openedu.autoAdvanceDelayMs, next.openedu.autoAdvanceDelayMs));
         }
 
